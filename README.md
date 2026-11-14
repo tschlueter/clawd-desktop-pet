@@ -20,8 +20,9 @@ and shipping releases to flying kites and making coffee.
 
 ## Installation
 
-1. Download `Clawd-Desktop-Pet-<version>.zip` from the [Releases](../../releases) page. It runs on
-   Apple Silicon and Intel Macs.
+1. Download `Clawd-Desktop-Pet-<version>.zip` from the [Releases](../../releases) page. It is a
+   universal app that contains both versions, for Apple Silicon and for Intel Macs, so there is
+   only one download.
 2. Unzip it and move **Clawd Desktop Pet.app** to your Applications folder.
 3. Open it. Because the app is not notarized by Apple, macOS will refuse to open it the first time
    and say it cannot verify the app. To allow it:
@@ -94,14 +95,13 @@ Clawd is meant to run all day without you noticing him in Activity Monitor:
 
 | | Approx. |
 |---|---|
-| App size | 1.5 MB (about 0.6 MB zipped). Everything is drawn and synthesized at runtime, with no image or audio files. |
 | Memory | about 15 MB |
 | CPU | about 3 % of one core with one Clawd, measured on an Apple M2 Max |
 | Network | none |
 
 The window list is read twice per second and the Dock every two seconds. Only while Clawd is standing
-on a window or flying through the air does he check windows more often. Every sprite is rendered once
-and then cached.
+on a window or flying through the air does he check windows more often. All graphics and sounds are
+generated at runtime, with no image or audio files, and every sprite is rendered once and then cached.
 
 ## How it's built
 
