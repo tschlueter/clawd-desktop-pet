@@ -824,3 +824,33 @@ struct SeededRandom: RandomNumberGenerator {
         #expect(PetController.wallHasRoom(x: 0, side: -1, depth: 48, y: 400, screens: two))
     }
 }
+
+// MARK: - Vollbild mit Notch
+
+@Suite struct NotchFullscreenTests {
+    let screen = NSRect(x: 0, y: 0, width: 1800, height: 1169)
+
+    @Test func fullscreenBelowTheNotchCounts() {
+        // Vollbild auf einem MacBook mit Notch: das Fenster lässt oben 39 pt frei.
+        let window = NSRect(x: 0, y: 0, width: 1800, height: 1130)
+        #expect(MediaWatcher.coveredScreens(windows: [window], screens: [screen], topInsets: [38]) == [screen])
+    }
+
+    @Test func normalWindowBelowTheMenuBarDoesNot() {
+        // Ein maximiertes Fenster unter Menüleiste und über dem Dock ist kein Vollbild.
+        let window = NSRect(x: 0, y: 74, width: 1800, height: 1057)
+        #expect(MediaWatcher.coveredScreens(windows: [window], screens: [screen], topInsets: [38]).isEmpty)
+    }
+
+    @Test func maximizedWindowWithHiddenDockIsNoFullscreen() {
+        // Gleiche Größe wie ein Vollbild unter der Notch, aber auf einem normalen Space (Dock-Fenster da).
+        let window = NSRect(x: 0, y: 0, width: 1800, height: 1130)
+        #expect(MediaWatcher.coveredScreens(windows: [window], screens: [screen], topInsets: [38],
+                                            dockLayers: [screen]).isEmpty)
+    }
+
+    @Test func screensWithoutNotchNeedTheWholeFrame() {
+        let window = NSRect(x: 0, y: 0, width: 1800, height: 1130)
+        #expect(MediaWatcher.coveredScreens(windows: [window], screens: [screen]).isEmpty)
+    }
+}

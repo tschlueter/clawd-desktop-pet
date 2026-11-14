@@ -111,15 +111,36 @@ final class MediaWatcher {
             else { return nil }
             return DockLocator.cocoaRect(fromTopLeft: cg)
         }
-        return coveredScreens(windows: windows, screens: NSScreen.screens.map(\.frame))
+        // Das Dock hat auf jedem normalen Space ein bildschirmgroßes Fenster (Ebene 20); in einem
+        // Vollbild-Space fehlt es. Damit lässt sich ein Vollbild unter der Notch von einem bloß
+        // maximierten Fenster (bei ausgeblendetem Dock) unterscheiden.
+        let dockLayers: [NSRect] = list.compactMap { info in
+            guard (info[kCGWindowLayer as String] as? Int) == 20,
+                  (info[kCGWindowOwnerName as String] as? String) == "Dock",
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let cg = CGRect(dictionaryRepresentation: bounds)
+            else { return nil }
+            return DockLocator.cocoaRect(fromTopLeft: cg)
+        }
+        let screens = NSScreen.screens
+        return coveredScreens(windows: windows, screens: screens.map(\.frame), topInsets: screens.map(\.safeAreaInsets.top),
+                              dockLayers: dockLayers)
     }
 
-    /// Bildschirme, die von einem Fenster vollständig (±1 pt) bedeckt sind.
-    static func coveredScreens(windows: [NSRect], screens: [NSRect]) -> [NSRect] {
-        screens.filter { s in
-            windows.contains { w in
-                abs(w.minX - s.minX) <= 1 && abs(w.minY - s.minY) <= 1 && abs(w.width - s.width) <= 1 && abs(w.height - s.height) <= 1
+    /// Bildschirme, die von einem Fenster vollständig (±1 pt) bedeckt sind. Bei MacBooks mit Notch
+    /// (`topInsets` > 0) lässt ein Vollbildfenster oben den Streifen neben der Kamera frei – es reicht
+    /// dann bis knapp unter die Notch (±2 pt).
+    /// Ein Fenster in Notch-Höhe zählt nur, wenn auf dem Bildschirm kein Dock-Fenster (`dockLayers`) liegt.
+    static func coveredScreens(windows: [NSRect], screens: [NSRect], topInsets: [CGFloat] = [],
+                               dockLayers: [NSRect] = []) -> [NSRect] {
+        screens.enumerated().filter { i, s in
+            let inset = i < topInsets.count ? topInsets[i] : 0
+            let normalSpace = dockLayers.contains { $0.intersects(s.insetBy(dx: 1, dy: 1)) }
+            return windows.contains { w in
+                guard abs(w.minX - s.minX) <= 1, abs(w.minY - s.minY) <= 1, abs(w.width - s.width) <= 1 else { return false }
+                if abs(w.height - s.height) <= 1 { return true }
+                return inset > 0 && !normalSpace && abs(w.height - (s.height - inset)) <= 2
             }
-        }
+        }.map(\.element)
     }
 }
