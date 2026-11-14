@@ -796,6 +796,10 @@ struct SeededRandom: RandomNumberGenerator {
         // Ab der Startneigung muss der Hangabtrieb (g = 2600 pt/s²) die Haftreibung übersteigen.
         #expect(PetController.slideStart * 2600 > Double(PetController.slideFriction))
         #expect(PetController.slideBusy > PetController.slideStart)
+        // Magnetschuhe: später und langsamer, aber ab ihrer Schwelle rutscht er trotzdem.
+        #expect(PetController.magnetSlideStart > PetController.slideStart)
+        #expect(PetController.magnetSlideFriction > PetController.slideFriction)
+        #expect(PetController.magnetSlideStart * 2600 > Double(PetController.magnetSlideFriction))
     }
 }
 

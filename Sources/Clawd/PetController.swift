@@ -864,7 +864,8 @@ final class PetController {
             if !startHopOff() { trace("Vom Dock hüpfen: nicht auf dem Dock oder kein Platz daneben") }
         case .slide:
             // Neigung vorspielen: 2,5 s lang, als würde das MacBook zur Seite gekippt.
-            demoTilt = Bool.random() ? 0.4 : -0.4
+            let strength = magneticShoes ? 0.55 : 0.4 // mit Magnetschuhen braucht es mehr
+            demoTilt = Bool.random() ? strength : -strength
             demoTiltUntil = CACurrentMediaTime() + 2.5
         }
     }
@@ -1199,6 +1200,10 @@ final class PetController {
             magnet = nil
             hideMagnetWaves()
         }
+        // Magnetschuhe halten gegen die Neigung: Die Stiefel leuchten, solange es ohne sie rutschen würde.
+        if magneticShoes, surface != nil, !isOnWall, abs(effectiveTilt) >= Self.slideStart {
+            node.bootsGlow = Int(now / 0.12) % 2 == 0
+        }
         node.showLaptop = false
         node.showHeadphones = false
         node.sportProp = nil
@@ -1443,6 +1448,15 @@ final class PetController {
     static let slideBusy = 0.35
     /// Haftreibung (pt/s²): Unterhalb von etwa 7° Neigung bleibt er stehen.
     static let slideFriction: CGFloat = 300
+    /// Mit Magnetschuhen hält er deutlich besser: erst ab ≈ 25° (aus Beschäftigungen ab ≈ 30°),
+    /// und er rutscht langsamer.
+    static let magnetSlideStart = 0.42
+    static let magnetSlideBusy = 0.5
+    static let magnetSlideFriction: CGFloat = 900
+
+    private var slideThreshold: Double { magneticShoes ? Self.magnetSlideStart : Self.slideStart }
+    private var slideBusyThreshold: Double { magneticShoes ? Self.magnetSlideBusy : Self.slideBusy }
+    private var slideFrictionNow: CGFloat { magneticShoes ? Self.magnetSlideFriction : Self.slideFriction }
 
     private var slideSpeed: CGFloat = 0
     private var slideDistance: CGFloat = 0
@@ -1451,12 +1465,12 @@ final class PetController {
     /// Ist das MacBook genug geneigt, verliert Clawd den Halt. Magnetschuhe an der Wand halten.
     private func reactToTilt(now: CFTimeInterval) {
         let tilt = effectiveTilt
-        guard abs(tilt) >= Self.slideStart, surface != nil, !isOnWall else { return }
+        guard abs(tilt) >= slideThreshold, surface != nil, !isOnWall else { return }
         switch state {
         case .walking, .idle, .looking, .sitting, .sleeping, .waving:
             break
         case .coding, .music, .sport, .emote, .job, .encounter:
-            guard abs(tilt) >= Self.slideBusy else { return }
+            guard abs(tilt) >= slideBusyThreshold else { return }
             encounter?.abort()
             job?.cleanup()
             job = nil
@@ -1485,7 +1499,7 @@ final class PetController {
         let t = CGFloat(dt)
         let drive = CGFloat(effectiveTilt) * gravity
         slideSpeed += drive * t
-        let friction = Self.slideFriction * t
+        let friction = slideFrictionNow * t
         slideSpeed = abs(slideSpeed) <= friction ? 0 : slideSpeed - friction * (slideSpeed > 0 ? 1 : -1)
         slideSpeed = min(max(slideSpeed, -900), 900)
         pos.x += slideSpeed * t
@@ -1509,7 +1523,7 @@ final class PetController {
             slideSpeed = 0
         }
         // Wieder gerade genug, um stehen zu bleiben? Dann verdutzt umschauen.
-        if slideSpeed == 0, abs(drive) < Self.slideFriction {
+        if slideSpeed == 0, abs(drive) < slideFrictionNow {
             trace(String(format: "rutscht nicht mehr (%.0f pt gerutscht)", slideDistance))
             state = slideDistance > 30 ? .looking(remaining: 2.4) : .idle(remaining: .random(in: 0.5...1.5))
         }
