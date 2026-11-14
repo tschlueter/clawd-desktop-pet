@@ -13,6 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var appearanceObservation: NSKeyValueObservation?
     private var playground: Playground?
     private let mediaWatcher = MediaWatcher()
+    private let tiltSensor = TiltSensor()
+
+    func applicationWillTerminate(_ notification: Notification) {
+        tiltSensor.stop() // Sensor wieder ausschalten
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DockLocator.requestAccessibility(prompt: true)
@@ -23,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async { self?.applyAppearance() }
         }
         stage = Stage()
+        stage.tiltSource = { [weak self] in self?.tiltSensor.lateral ?? 0 }
+        if Settings.reactToTilt { tiltSensor.start() }
         world = World()
         world.includeWindows = Settings.walkOnWindows
         Settings.migrate()
@@ -42,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DebugLog.enabled = options.isDebugging
         Jobs.weekendOverride = options.weekend
         mediaWatcher.poll()
+        if options.record != nil {
+            startRecording(options)
+            return
+        }
         start(options)
         if options.playground {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.openPlayground() }
@@ -139,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DemoEntry("demo.sit", .behavior(.sit)), DemoEntry("demo.sleep", .behavior(.sleep)),
             DemoEntry("demo.yawn", .behavior(.yawn)), DemoEntry("demo.sneeze", .behavior(.sneeze)),
             DemoEntry("demo.dizzy", .behavior(.dizzy)), DemoEntry("demo.hide", .behavior(.hide)),
+            DemoEntry("demo.hopOff", .behavior(.hopOff)), DemoEntry("demo.slide", .behavior(.slide)),
         ]),
         DemoGroup("demo.leisure", [
             DemoEntry("demo.music", .behavior(.music)), DemoEntry("demo.plane", .job(PaperPlaneJob.self)),
@@ -330,6 +342,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Spielplatz öffnen: Alle Clawds fallen oben hinein und bleiben dort, bis er geschlossen wird.
+    // MARK: - Szenen aufnehmen (Startoption --record)
+
+    private var recorder: SceneRecorder?
+
+    /// Ein Clawd fällt in einen eigenen Spielplatz; die Szene wird als GIF gespeichert, danach
+    /// beendet sich die App.
+    private func startRecording(_ options: LaunchOptions) {
+        guard let path = options.record else { return }
+        forcedTheme = .light
+        applyAppearance()
+        voice.volume = 0
+        let p = Playground(stage: stage, world: world, size: options.playgroundSize ?? NSSize(width: 600, height: 300))
+        p.onClose = { NSApp.terminate(nil) }
+        playground = p
+        p.refreshTheme()
+        let rec = SceneRecorder(playground: p, rect: options.recordRect, scale: options.recordScale,
+                                duration: options.recordSeconds, path: path) { NSApp.terminate(nil) }
+        recorder = rec
+        // Kurz warten, bis Fenster und Welt stehen, dann den Clawd hineinfallen lassen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, let c = self.spawn() else { return }
+            c.debugForce = options.force
+            let drop = p.dropPoint(index: 0, of: 1)
+            if case .encounter(let kind) = options.scenario, let partner = self.spawn() {
+                // Begegnung: ein zweiter Clawd landet daneben, die Bühne startet die gewünschte Szene.
+                self.stage.forcedEncounter = kind
+                [c, partner].forEach { $0.allowEncountersNow() }
+                c.dropIn(at: CGPoint(x: drop.x - 35, y: drop.y))
+                partner.dropIn(at: CGPoint(x: drop.x + 35, y: drop.y))
+            } else {
+                c.dropIn(at: drop)
+            }
+            if options.recordFromStart { rec.start() }
+            c.onFirstLanding = {
+                if !options.recordFromStart { rec.start() }
+                for (t, step) in options.script {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + t) { c.runScript(step) }
+                }
+            }
+        }
+    }
+
     private func openPlayground() {
         let p = Playground(stage: stage, world: world)
         p.onClose = { [weak self] in self?.playgroundClosed() }
@@ -420,6 +474,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(volumeItem)
         addToggle(to: menu, L10n.t("windows"), on: Settings.walkOnWindows, #selector(toggleWindows))
         addToggle(to: menu, L10n.t("magnetic"), on: Settings.magneticShoes, #selector(toggleMagneticShoes))
+        if tiltSensor.isAvailable {
+            addToggle(to: menu, L10n.t("tilt"), on: Settings.reactToTilt, #selector(toggleTilt))
+        }
         addToggle(to: menu, L10n.t("login"), on: SMAppService.mainApp.status == .enabled,
                   #selector(toggleLoginItem))
 
@@ -478,9 +535,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Hell/Dunkel bestimmen und – falls geändert – an alle Clawds weitergeben.
+    /// Bei Aufnahmen immer hell (passt zum hellen GitHub-Hintergrund).
+    private var forcedTheme: ClawdSprite.Theme?
+
     private func applyAppearance() {
         let theme: ClawdSprite.Theme
-        switch Settings.appearance {
+        switch forcedTheme.map(\.rawValue) ?? Settings.appearance {
         case "light": theme = .light
         case "dark": theme = .dark
         default:
@@ -537,6 +597,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         voice.volume = Float(sender.doubleValue)
         // Beim Loslassen eine kleine Hörprobe.
         if NSApp.currentEvent?.type == .leftMouseUp { uiVoice?.play(.happy) }
+    }
+
+    @objc private func toggleTilt() {
+        Settings.reactToTilt.toggle()
+        if Settings.reactToTilt { tiltSensor.start() } else { tiltSensor.stop() }
     }
 
     @objc private func toggleMagneticShoes() {

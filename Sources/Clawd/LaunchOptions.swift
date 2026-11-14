@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Entwickler-Logs auf stdout. Bleiben auch im Release verfügbar, damit sich Abläufe ohne
 /// Debugger über Startargumente prüfen lassen.
@@ -28,6 +28,16 @@ enum DebugLog {
 /// - `--droptest` – ein Clawd wird wie vom Nutzer auf einen anderen fallen gelassen
 /// - `--playground` – nach dem Start den Spielplatz öffnen
 /// - `--weekend` / `--weekday` – Wochenend-Modus erzwingen bzw. abschalten (sonst gilt der Kalender)
+///
+/// Szenen als GIF aufnehmen (für die README), immer im Spielplatz, hell und stumm:
+/// - `--record <datei.gif>` – ein Clawd fällt in den Spielplatz; aufgenommen wird ab der Landung
+/// - `--record-seconds <s>` – Länge der Aufnahme (Standard 8)
+/// - `--record-from-start` – schon den Fall in den Spielplatz aufnehmen
+/// - `--record-rect x,y,b,h` – nur diesen Ausschnitt (Punkte, von unten links im Spielplatz)
+/// - `--record-scale <f>` – Auflösung (Standard 2)
+/// - `--playground-size BxH` – Größe des Spielplatz-Fensters
+/// - `--script "0.5:wave,2:jump"` – Aktionen, Sekunden nach der Landung (siehe `PetController.runScript`)
+/// - zusammen mit `--encounter <art>`: zwei Clawds landen nebeneinander und spielen diese Begegnung
 struct LaunchOptions {
     enum Scenario {
         case normal
@@ -43,10 +53,17 @@ struct LaunchOptions {
     var demo: DemoAction?
     var playground = false
     var weekend: Bool?
+    var record: String?
+    var recordSeconds: Double = 8
+    var recordFromStart = false
+    var recordRect: CGRect?
+    var recordScale: CGFloat = 2
+    var playgroundSize: NSSize?
+    var script: [(time: Double, step: String)] = []
 
     /// Irgendein Entwickler-Ablauf aktiv? Dann wird geloggt.
     var isDebugging: Bool {
-        if case .normal = scenario { return demo != nil || playground }
+        if case .normal = scenario { return demo != nil || playground || record != nil }
         return true
     }
 
@@ -63,6 +80,21 @@ struct LaunchOptions {
         force = value(after: "--force").flatMap(DemoAction.init(argument:))
         demo = value(after: "--demo").flatMap(DemoAction.init(argument:))
         playground = arguments.contains("--playground")
+        record = value(after: "--record")
+        recordSeconds = value(after: "--record-seconds").flatMap(Double.init) ?? 8
+        recordFromStart = arguments.contains("--record-from-start")
+        if let p = value(after: "--record-rect")?.split(separator: ",").compactMap({ Double($0) }), p.count == 4 {
+            recordRect = CGRect(x: p[0], y: p[1], width: p[2], height: p[3])
+        }
+        recordScale = value(after: "--record-scale").flatMap(Double.init).map { CGFloat($0) } ?? 2
+        if let p = value(after: "--playground-size")?.split(separator: "x").compactMap({ Double($0) }), p.count == 2 {
+            playgroundSize = NSSize(width: p[0], height: p[1])
+        }
+        script = (value(after: "--script") ?? "").split(separator: ",").compactMap { item in
+            let parts = item.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, let t = Double(parts[0]) else { return nil }
+            return (t, String(parts[1]))
+        }
         if arguments.contains("--weekend") { weekend = true } else if arguments.contains("--weekday") { weekend = false }
 
         if let kind = value(after: "--encounter") {

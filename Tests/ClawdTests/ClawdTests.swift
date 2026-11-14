@@ -729,3 +729,72 @@ struct SeededRandom: RandomNumberGenerator {
         }
     }
 }
+
+// MARK: - Bildschirmränder und Boden neben dem Dock
+
+@Suite struct ScreenEdgeTests {
+    let screen = ScreenArea(frame: NSRect(x: 0, y: 0, width: 1440, height: 900),
+                            visibleFrame: NSRect(x: 0, y: 70, width: 1440, height: 805))
+
+    @Test func singleScreenHasTwoMagneticEdges() {
+        let edges = World.screenEdges([screen])
+        #expect(edges.count == 2)
+        #expect(edges.keys.allSatisfy(World.isScreenEdge))
+        #expect(edges.values.contains { $0.maxX == 0 })     // linker Rand = rechte Seite eines Rahmens
+        #expect(edges.values.contains { $0.minX == 1440 })  // rechter Rand = linke Seite eines Rahmens
+    }
+
+    @Test func edgesBetweenScreensAreNotMagnetic() {
+        let second = ScreenArea(frame: NSRect(x: 1440, y: 0, width: 1920, height: 1080),
+                                visibleFrame: NSRect(x: 1440, y: 0, width: 1920, height: 1055))
+        let edges = World.screenEdges([screen, second])
+        #expect(edges.count == 2)
+        #expect(Set(edges.values.map { $0.maxX == 0 ? 0 : $0.minX }) == [0, 3360])
+    }
+
+    @Test func walkingIntoTheLeftEdgeClimbsIt() {
+        let edges = World.screenEdges([screen])
+        let wall = PetController.climbableWall(in: edges, groundY: 0, from: 3, to: -1, direction: -1)
+        #expect(wall?.side == 1)
+        #expect(wall.map { World.isScreenEdge($0.id) } == true)
+        let right = PetController.climbableWall(in: edges, groundY: 0, from: 1437, to: 1441, direction: 1)
+        #expect(right?.side == -1)
+    }
+
+    @Test func draggedNearTheEdgeIsAttracted() {
+        let edges = World.screenEdges([screen])
+        let m = PetController.magnetTarget(body: NSRect(x: 20, y: 400, width: 56, height: 32),
+                                           windows: edges, reach: 40, margin: 28)
+        #expect(m?.side == 1)
+        #expect(m?.distance == 20)
+    }
+
+    @Test func floorIsSplitAroundTheDock() {
+        let dock = Platform(kind: .dock, minX: 400, maxX: 1000, y: 70)
+        let floor = World.floorSegments(screens: [screen], dock: dock)
+        #expect(floor.map { [$0.minX, $0.maxX] } == [[0, 400], [1000, 1440]])
+        #expect(floor.allSatisfy { $0.kind == .floor(0) && $0.y == 0 })
+        #expect(World.floorSegments(screens: [screen], dock: nil).count == 1)
+    }
+}
+
+// MARK: - Neigung
+
+@Suite struct TiltTests {
+    @Test func parsesLateralAxisFromReport() {
+        var report = [UInt8](repeating: 0, count: 22)
+        let value = Int32(-0.25 * 65536) // −0,25 g
+        withUnsafeBytes(of: value.littleEndian) { bytes in
+            for (i, b) in bytes.enumerated() { report[TiltSensor.axisOffset + i] = b }
+        }
+        let g = report.withUnsafeBufferPointer { TiltSensor.lateral(from: $0) }
+        #expect(g == -0.25 * TiltSensor.axisSign)
+        #expect([UInt8](repeating: 0, count: 4).withUnsafeBufferPointer { TiltSensor.lateral(from: $0) } == nil)
+    }
+
+    @Test func slidingStartsAboveFriction() {
+        // Ab der Startneigung muss der Hangabtrieb (g = 2600 pt/s²) die Haftreibung übersteigen.
+        #expect(PetController.slideStart * 2600 > Double(PetController.slideFriction))
+        #expect(PetController.slideBusy > PetController.slideStart)
+    }
+}

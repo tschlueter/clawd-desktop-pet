@@ -64,7 +64,7 @@ final class BugHuntJob: Job {
                     // Daneben – der Käfer flitzt davon
                     dashUntil = now + 0.8
                     bugDir = Bool.random() ? 1 : -1
-                    if c.isChatty { c.say(.eep) }
+                    if c.isChatty { c.say(oneOf: [.eep, .huch]) }
                 }
             }
             if t > 15 { caught = true; next(now) }

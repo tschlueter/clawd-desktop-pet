@@ -71,6 +71,8 @@ enum Settings {
     /// Magnetschuhe: an den Seitenkanten von Fenstern hoch- und runterlaufen.
     @UserDefault("magneticShoes", default: false) static var magneticShoes: Bool
     @UserDefault("walkOnWindows", default: true) static var walkOnWindows: Bool
+    /// Neigt man das MacBook, rutscht Clawd zur Seite (nur mit Beschleunigungssensor).
+    @UserDefault("reactToTilt", default: true) static var reactToTilt: Bool
 
     /// Alte Einstellungen übernehmen. Den Schalter "Geräusche" gibt es nicht mehr – wer ihn
     /// ausgeschaltet hatte, bekommt stattdessen die Gesprächigkeit "Still".

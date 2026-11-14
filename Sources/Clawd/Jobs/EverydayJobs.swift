@@ -209,7 +209,7 @@ final class FilesJob: Job {
             c.face(dir)
             let wobble = t < 1.0 ? (Int(t / 0.15) % 2 == 0 ? 1 : -1) : 0
             pose = Encounter.Pose(sprite: t < 1.0 ? ClawdSprite.flail : ClawdSprite.stand)
-            if once("eep") { c.say(.eep) }
+            if once("eep") { c.say(oneOf: [.eep, .oiWorried]) }
             drawPile(wobble: wobble)
             if t >= 1.4 { next(now) }
         case 2:

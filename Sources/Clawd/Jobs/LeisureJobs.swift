@@ -180,7 +180,7 @@ final class KiteJob: Job {
             drawKite(at: CGPoint(x: c.center - dir * 8 * px, y: c.groundY + 14 * px + lift), now: now)
             if arrived || t >= 2.5 {
                 c.face(dir)
-                c.say(.whee)
+                c.say(oneOf: Voice.Sound.cheer)
                 next(now)
             }
         case 1:
@@ -303,16 +303,17 @@ final class ArcheryJob: Job {
     private var wobbleUntil: CFTimeInterval = 0
     private var targetScale: CGFloat { px * 0.8 }
     private var targetWidth: CGFloat { CGFloat(ClawdSprite.target[0].count) * targetScale }
-    /// Mitte der Scheibe (Höhe des gelben Zentrums).
+    /// Mitte der Scheibe (Höhe des Zentrums).
     private var bullseye: CGPoint {
-        let row = ClawdSprite.target.firstIndex { $0.contains("k") } ?? 0
+        let row = ClawdSprite.target.firstIndex { $0.contains("j") } ?? 0
         return CGPoint(x: targetX, y: c.groundY + (CGFloat(ClawdSprite.target.count - row) - 0.5) * targetScale)
     }
 
     private func drawTarget(_ now: CFTimeInterval) {
         let wobble: CGFloat = now < wobbleUntil ? (Int(now / 0.05) % 2 == 0 ? 1 : -1) : 0
         showEffect("target", ClawdSprite.target,
-                   origin: CGPoint(x: targetX - targetWidth / 2 + wobble, y: c.groundY), scale: targetScale)
+                   origin: CGPoint(x: targetX - targetWidth / 2 + wobble, y: c.groundY), scale: targetScale,
+                   shadow: true)
     }
 
     override func step(now: CFTimeInterval, dt: TimeInterval) {

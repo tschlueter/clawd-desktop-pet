@@ -10,6 +10,10 @@ enum DemoAction {
         case barbell, rope
         /// Mit Magnetschuhen von einer Fensterkante zur nächsten springen.
         case wallJump
+        /// Zum Dock-Ende laufen und auf den Boden daneben hüpfen.
+        case hopOff
+        /// Neigung vorspielen: Clawd rutscht zur Seite wie bei einem gekippten MacBook.
+        case slide
     }
 
     case behavior(Behavior)

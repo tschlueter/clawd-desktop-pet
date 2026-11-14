@@ -41,7 +41,7 @@ final class SecurityCheckJob: Job {
             // Lücke gefunden!
             drawLock(open: true, cracked: Int(t / 0.15) % 2 == 0)
             showAboveHead("glyph", ClawdSprite.exclamationGlyph)
-            if once("eep") { c.say(.eep) }
+            if once("eep") { c.say(oneOf: [.eep, .huch]) }
             pose = Encounter.Pose(sprite: ClawdSprite.flail, lift: t < 0.3 ? 1 : 0)
             if t >= 1.2 { hideEffect("glyph"); next(now) }
         case 3:

@@ -72,6 +72,11 @@ extension ClawdSprite {
             "5": (0xC9, 0x9A, 0x12), // Bauhelm: Rippen, Krempe
             "6": (0xFF, 0xF3, 0xB0), // Bauhelm: Glanz
             "9": (0x26, 0x29, 0x2D), // Schwarzer Denkhut
+            "i": (0x23, 0x4A, 0x8E), // Zielscheibe: äußerer Ring (dunkelblau)
+            "I": (0x2F, 0x63, 0xB8), // Zielscheibe: blauer Ring
+            "A": (0xE2, 0xC6, 0x86), // Zielscheibe: Stroh
+            "F": (0xC6, 0xA2, 0x5C), // Zielscheibe: Stroh, dunklerer Ring
+            "j": (0xA8, 0x2C, 0x2C), // Zielscheibe: Zentrum
         ],
         .dark: [
             "K": (0x8C, 0x93, 0x9B),
@@ -118,6 +123,11 @@ extension ClawdSprite {
             "5": (0xE0, 0xB5, 0x2A),
             "6": (0xFF, 0xF8, 0xD0),
             "9": (0x3A, 0x3F, 0x45), // auf dunklem Grund dunkelgrau statt schwarz
+            "i": (0x3A, 0x6C, 0xC4),
+            "I": (0x52, 0x86, 0xDE),
+            "A": (0xEC, 0xD3, 0x98),
+            "F": (0xD2, 0xB0, 0x6A),
+            "j": (0xC4, 0x3A, 0x3A),
         ],
     ]
 

@@ -341,7 +341,7 @@ final class Encounter {
             // Antippen: "Du bist!"
             set(chaser, Pose(sprite: ClawdSprite.wave[1]))
             set(other(chaser), Pose(sprite: ClawdSprite.stand))
-            if t >= 0.25, once("tap") { other(chaser).say(.eep) }
+            if t >= 0.25, once("tap") { other(chaser).say(oneOf: Voice.Sound.startled) }
             if t >= 0.5 {
                 let runner = other(chaser)
                 runDir = runner.center >= chaser.center ? 1 : -1
@@ -369,7 +369,7 @@ final class Encounter {
                 lastTag = now
                 let newRunner = other(chaser)
                 runDir = newRunner.center >= chaser.center ? 1 : -1
-                newRunner.say(.eep)
+                newRunner.say(oneOf: Voice.Sound.startled)
                 log("  erwischt (\(tags))")
             }
             if tags >= 3 || t > 14 { next(now) }
@@ -529,8 +529,8 @@ final class Encounter {
             a.moveCenter(to: (marks[ObjectIdentifier(a)] ?? a.center) - 8 * px * p)
             b.moveCenter(to: (marks[ObjectIdentifier(b)] ?? b.center) + 8 * px * p)
             both(Pose(sprite: ClawdSprite.flail, lift: 3 * sin(.pi * p)))
-            if once("eep-a") { a.say(.eep) }
-            if t >= 0.08, once("eep-b") { b.say(.eep) }
+            if once("eep-a") { a.say(oneOf: Voice.Sound.startled) }
+            if t >= 0.08, once("eep-b") { b.say(oneOf: Voice.Sound.startled) }
             if t >= 0.4 { next(now) }
         case 2:
             both(Pose(sprite: t > 0.4 && t < 0.55 ? ClawdSprite.blink : ClawdSprite.stand))
@@ -683,8 +683,8 @@ final class Encounter {
             b.moveCenter(to: (marks[ObjectIdentifier(b)] ?? b.center) + jitter * px)
             showEffect("paper", ClawdSprite.tugPaper, origin: CGPoint(x: mid - 5 * s + jitter * px, y: a.groundY + 3 * px), scale: s)
             both(Pose(sprite: ClawdSprite.scold[1], lift: Int(t / 0.2) % 2 == 0 ? 0 : 0.5))
-            if once("grr"), a.isChatty { a.say(.scold) }
-            if t >= 0.9, once("grr2"), b.isChatty { b.say(.scold) }
+            if once("grr"), a.isChatty { a.say(oneOf: [.scold, .grrr]) }
+            if t >= 0.9, once("grr2"), b.isChatty { b.say(oneOf: [.scold, .grrr]) }
             if t >= 2.6 { next(now) }
         case 2:
             // Ratsch! Beide fallen nach hinten auf den Hintern
@@ -695,8 +695,8 @@ final class Encounter {
             showEffect("left", ClawdSprite.tugPaperLeft, origin: CGPoint(x: a.center + 6 * px, y: a.groundY + 3 * px * (1 - p) + px), scale: s)
             showEffect("right", ClawdSprite.tugPaperRight, origin: CGPoint(x: b.center - 6 * px - 5 * s, y: b.groundY + 3 * px * (1 - p) + px), scale: s)
             both(Pose(sprite: p < 1 ? ClawdSprite.flail : ClawdSprite.sit, lift: 2 * sin(.pi * p)))
-            if once("rip") { a.say(.eep) }
-            if t >= 0.1, once("rip2") { b.say(.eep) }
+            if once("rip") { a.say(oneOf: Voice.Sound.whine) }
+            if t >= 0.1, once("rip2") { b.say(oneOf: Voice.Sound.whine) }
             if t >= 0.6 { next(now) }
         case 3:
             // Erschrocken anschauen
@@ -766,7 +766,7 @@ final class Encounter {
             // a erschrickt, b hüpft verwirrt
             set(a, Pose(sprite: ClawdSprite.flail, prop: ClawdSprite.wand(.up), particles: .sweat, hat: hat))
             set(b, victim(lift: Int(t / 0.25) % 2 == 0 ? 0 : 1))
-            if once("eep") { a.say(.eep) }
+            if once("eep") { a.say(oneOf: [.eep, .oiWorried]) }
             if t >= 1.6 { next(now) }
         case 5, 6, 7:
             // Drei hektische Versuche; erst der dritte klappt.
@@ -796,7 +796,7 @@ final class Encounter {
             set(a, Pose(sprite: ClawdSprite.happyStand, prop: ClawdSprite.wand(.up), particles: .sweat, hat: hat))
             set(b, Pose(sprite: ClawdSprite.lookCycle[Int(t / 0.12) % 2 == 0 ? 1 : 3]))
             if once("phew") { a.say(.happy) }
-            if t >= 0.8, once("grumble"), b.isChatty { b.say(.scold) }
+            if t >= 0.8, once("grumble"), b.isChatty { b.say(oneOf: [.scold, .hmpf]) }
             if t >= 1.6 { end(now, walkAway: true) }
         }
     }

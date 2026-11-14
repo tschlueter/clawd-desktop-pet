@@ -166,7 +166,7 @@ final class TrashOutJob: Job {
         case 4:
             // Schwung – und weg!
             pose = Encounter.Pose(sprite: t < 0.25 ? ClawdSprite.flail : ClawdSprite.stand)
-            if once("throw") { c.say(.whee) }
+            if once("throw") { c.say(oneOf: Voice.Sound.cheer) }
             let p = CGFloat(min(t / 1.0, 1))
             let x = throwFrom.x + throwDir * 140 * p
             let y = throwFrom.y + 40 * sin(.pi * p * 0.6) - 260 * p * p

@@ -43,6 +43,8 @@ final class Stage {
     private var playgroundOverlay: Overlay?
     /// Wird zu Beginn jedes Takts aufgerufen (der Spielplatz prüft dort, ob sein Fenster bewegt wurde).
     var beforeTick: (() -> Void)?
+    /// Liefert die aktuelle Querneigung des MacBooks in g (siehe `TiltSensor`).
+    var tiltSource: (() -> Double)?
     /// Reihenfolge = Zeichenreihenfolge; der letzte liegt oben.
     private(set) var controllers: [PetController] = []
     private var dragTarget: PetController?
@@ -146,6 +148,8 @@ final class Stage {
     private func tick() {
         beforeTick?()
         let now = CACurrentMediaTime()
+        let tilt = tiltSource?() ?? 0
+        for controller in controllers { controller.tilt = tilt }
         if !pausedScreens.isEmpty || !pausedControllers.isEmpty { updateCover(now: now) }
         CATransaction.begin()
         transactionOpen = true

@@ -144,7 +144,7 @@ final class BoxJob: Job {
             pose = Encounter.Pose(sprite: ClawdSprite.sit)
             showEffect("box", ClawdSprite.box, origin: boxOrigin(height: 2 * (1 - p)), scale: px)
             if t >= 0.5 {
-                c.say(.oof)
+                c.say(oneOf: [.oof, .uff])
                 next(now)
             }
         default:

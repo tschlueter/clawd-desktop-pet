@@ -26,7 +26,7 @@ final class DeadlinePanicJob: Job {
             if once("setup") {
                 home = c.center
                 dir = roomierDirection()
-                c.say(.eep)
+                c.say(oneOf: Voice.Sound.fluster)
             }
             drawSigns(now)
             if Int(t / 0.5) != Int((t - dt) / 0.5) { c.say(.wallPock) } // Ticken
@@ -45,7 +45,7 @@ final class DeadlinePanicJob: Job {
         default:
             hideEffect("cal"); hideEffect("clock")
             pose = Encounter.Pose(sprite: ClawdSprite.squash, particles: .sweat)
-            if once("puh") { c.say(.oof) }
+            if once("puh") { c.say(oneOf: [.oof, .uff]) }
             if t >= 1.3 { finish() }
         }
     }
@@ -87,7 +87,7 @@ final class NightShiftJob: Job {
         case 3:
             // … hochschrecken!
             drawDesk()
-            if once("jolt") { c.say(.eep) }
+            if once("jolt") { c.say(oneOf: Voice.Sound.startled) }
             pose = Encounter.Pose(sprite: ClawdSprite.flail, lift: t < 0.3 ? 2 : 0)
             if t >= 0.6 { next(now) }
         default:
@@ -131,7 +131,7 @@ final class CablesJob: Job {
             drawMountain(min(Int(total / 1.3), 3), jitter: jitter)
             pose = Encounter.Pose(sprite: tug ? ClawdSprite.flail : ClawdSprite.wave[1],
                                   particles: .cables, lift: tug ? 1 : 0)
-            if phase == 0, t >= 1.0, once("grr"), c.isChatty { c.say(.scold) }
+            if phase == 0, t >= 1.0, once("grr"), c.isChatty { c.say(oneOf: [.scold, .grrr]) }
             if t >= 2.6 { next(now) }
         case 2:
             // Geschafft – zufrieden nicken
@@ -184,7 +184,7 @@ final class ShipItJob: Job {
             pose = Encounter.Pose(sprite: t < 0.35 ? ClawdSprite.squash : ClawdSprite.flail)
             if t >= 0.35, once("kick") {
                 c.say(.wallPock)
-                c.say(.whee)
+                c.say(oneOf: Voice.Sound.cheer)
             }
             let p = CGFloat(max(0, min((t - 0.35) / 1.0, 1)))
             let o = boxOrigin

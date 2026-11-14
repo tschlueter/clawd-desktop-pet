@@ -6,7 +6,8 @@ struct Platform {
         case dock
         case floor(Int) // Index in World.screens
         case window(CGWindowID)
-        /// Seitenkante eines Fensters (nur mit Magnetschuhen): side −1 = links, +1 = rechts.
+        /// Seitenkante eines Fensters oder äußerer Bildschirmrand (nur mit Magnetschuhen):
+        /// side −1 = linke Seite des Rahmens, +1 = rechte (siehe `World.wallFrames`).
         case wall(CGWindowID, Int)
     }
 
@@ -40,6 +41,8 @@ final class World {
     private(set) var windowFrames: [CGWindowID: NSRect] = [:]
     /// Stapelreihenfolge der Fenster: 0 = vorderstes.
     private(set) var windowOrder: [CGWindowID: Int] = [:]
+    /// Äußere linke und rechte Bildschirmränder als gedachte Rahmen außerhalb des Bildschirms.
+    private(set) var screenEdgeFrames: [CGWindowID: NSRect] = [:]
 
     var includeWindows = true
 
@@ -71,6 +74,7 @@ final class World {
             trash = snapshot.trash
             dockIcons = snapshot.icons
             screens = NSScreen.screens.map { ScreenArea(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+            screenEdgeFrames = Self.screenEdges(screens)
         }
         if force || now - lastWindowCheck > windowMaxAge {
             lastWindowCheck = now
@@ -84,9 +88,22 @@ final class World {
         Platform(kind: .dock, minX: dock.minX, maxX: dock.maxX, y: dock.y)
     }
 
+    /// Bildschirm-Unterkanten. Auf dem Dock-Bildschirm nur links und rechts vom Dock – vor den
+    /// Symbolen läuft Clawd nie.
     var floorPlatforms: [Platform] {
-        screens.enumerated().map { i, s in
-            Platform(kind: .floor(i), minX: s.frame.minX, maxX: s.frame.maxX, y: s.frame.minY)
+        Self.floorSegments(screens: screens, dock: dock.isDock ? dockPlatform : nil)
+    }
+
+    /// Reine Geometrie zu `floorPlatforms`: Unterkanten, aus denen der Dock-Bereich ausgespart ist.
+    static func floorSegments(screens: [ScreenArea], dock: Platform?) -> [Platform] {
+        screens.enumerated().flatMap { i, s -> [Platform] in
+            let f = s.frame
+            guard let d = dock, d.maxX > f.minX, d.minX < f.maxX, d.y > f.minY, d.y < f.maxY else {
+                return [Platform(kind: .floor(i), minX: f.minX, maxX: f.maxX, y: f.minY)]
+            }
+            return [(f.minX, d.minX), (d.maxX, f.maxX)]
+                .filter { $0.1 > $0.0 }
+                .map { Platform(kind: .floor(i), minX: $0.0, maxX: $0.1, y: f.minY) }
         }
     }
 
@@ -106,12 +123,10 @@ final class World {
         switch kind {
         case .dock:
             return dockPlatform
-        case .floor(let i):
-            return floorPlatforms.indices.contains(i) ? floorPlatforms[i] : nil
         case .wall:
             return nil
-        case .window:
-            let segments = windowPlatforms.filter { $0.kind == kind }
+        case .floor, .window:
+            let segments = (windowPlatforms + floorPlatforms).filter { $0.kind == kind }
             return segments.first { $0.contains(x: x) }
                 ?? segments.min { abs(($0.minX + $0.maxX) / 2 - x) < abs(($1.minX + $1.maxX) / 2 - x) }
         }
@@ -120,6 +135,7 @@ final class World {
     /// Spielplatz als einzige Welt übernehmen.
     private func apply(_ p: PlaygroundLayout) {
         screens = [ScreenArea(frame: p.area, visibleFrame: p.area)]
+        screenEdgeFrames = Self.screenEdges(screens)
         dock = Walkway(minX: p.dock.minX, maxX: p.dock.maxX, y: p.dock.maxY, isDock: true)
         trash = p.trash
         dockIcons = p.icons
@@ -128,10 +144,47 @@ final class World {
         windowPlatforms = p.boxes.map { Platform(kind: .window($0.id), minX: $0.rect.minX, maxX: $0.rect.maxX, y: $0.rect.maxY) }
     }
 
+    // MARK: - Wände für die Magnetschuhe
+
+    /// Alles, woran Clawd mit Magnetschuhen haften kann: Fensterrahmen und die äußeren Bildschirmränder.
+    /// Ein Bildschirmrand ist ein gedachter Rahmen direkt außerhalb des Bildschirms – seine dem
+    /// Bildschirm zugewandte Seite ist der Rand (linker Rand → side +1, rechter Rand → side −1).
+    var wallFrames: [CGWindowID: NSRect] {
+        windowFrames.merging(screenEdgeFrames) { window, _ in window }
+    }
+
+    /// Fenster-IDs ab hier stehen für Bildschirmränder (echte Fenster-IDs sind viel kleiner).
+    static let screenEdgeIDBase: CGWindowID = 0xFFFF_0000
+
+    static func isScreenEdge(_ id: CGWindowID) -> Bool { id >= screenEdgeIDBase }
+
+    /// Linke und rechte Ränder aller Bildschirme, an die kein anderer Bildschirm grenzt.
+    static func screenEdges(_ screens: [ScreenArea]) -> [CGWindowID: NSRect] {
+        let depth: CGFloat = 2000
+        var edges: [CGWindowID: NSRect] = [:]
+        for (i, s) in screens.enumerated() {
+            let f = s.frame
+            func neighbour(atX x: CGFloat) -> Bool {
+                screens.contains { o in
+                    o.frame != f && (abs(o.frame.maxX - x) < 2 || abs(o.frame.minX - x) < 2)
+                        && o.frame.maxY > f.minY && o.frame.minY < f.maxY
+                }
+            }
+            if !neighbour(atX: f.minX) {
+                edges[screenEdgeIDBase + CGWindowID(i * 2)] = NSRect(x: f.minX - depth, y: f.minY, width: depth, height: f.height)
+            }
+            if !neighbour(atX: f.maxX) {
+                edges[screenEdgeIDBase + CGWindowID(i * 2 + 1)] = NSRect(x: f.maxX, y: f.minY, width: depth, height: f.height)
+            }
+        }
+        return edges
+    }
+
     /// Ist dieser Punkt einer Fensterkante sichtbar – also nicht von einem davorliegenden Fenster verdeckt?
-    /// Nur sichtbare Kanten taugen für die Magnetschuhe.
+    /// Nur sichtbare Kanten taugen für die Magnetschuhe. Bildschirmränder sind immer frei.
     func isEdgeVisible(_ id: CGWindowID, at point: CGPoint) -> Bool {
-        Self.isEdgeVisible(id, at: point, frames: windowFrames, order: windowOrder)
+        if Self.isScreenEdge(id) { return true }
+        return Self.isEdgeVisible(id, at: point, frames: windowFrames, order: windowOrder)
     }
 
     static func isEdgeVisible(_ id: CGWindowID, at point: CGPoint, frames: [CGWindowID: NSRect],

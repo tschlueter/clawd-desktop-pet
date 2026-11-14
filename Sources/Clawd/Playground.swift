@@ -13,11 +13,10 @@ final class Playground: NSObject, NSWindowDelegate {
     /// Wird nach dem Schließen aufgerufen.
     var onClose: (() -> Void)?
 
-    init(stage: Stage, world: World) {
+    init(stage: Stage, world: World, size: NSSize = NSSize(width: 720, height: 460)) {
         self.stage = stage
         self.world = world
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let size = NSSize(width: 720, height: 460)
         let rect = NSRect(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2, width: size.width, height: size.height)
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .resizable, .miniaturizable],
                           backing: .buffered, defer: false)
@@ -79,6 +78,21 @@ final class Playground: NSObject, NSWindowDelegate {
     }
 
     func close() { window.close() }
+
+    /// Inhalt als Bild (für `SceneRecorder`): `rect` in Punkten relativ zur unteren linken Ecke,
+    /// ohne Angabe der ganze Spielplatz.
+    func snapshot(rect: CGRect?, scale: CGFloat) -> CGImage? {
+        let root = view.rootLayer
+        let r = (rect ?? root.bounds).integral
+        guard let ctx = CGContext(data: nil, width: Int(r.width * scale), height: Int(r.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .none
+        ctx.scaleBy(x: scale, y: scale)
+        ctx.translateBy(x: -r.minX, y: -r.minY)
+        root.render(in: ctx)
+        return ctx.makeImage()
+    }
 
     func windowWillClose(_ notification: Notification) {
         stage.beforeTick = nil

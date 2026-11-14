@@ -39,6 +39,11 @@ final class Voice {
     enum Sound: CaseIterable {
         /// Die Verabschiedungen, im Wechsel verwendet.
         static let byes: [Sound] = [.byeRising, .byeFalling, .byeHop]
+        /// Varianten für dieselbe Situation – pro Auslösung wird zufällig eine gewählt.
+        static let startled: [Sound] = [.eep, .huch, .huhUch]     // Schreck
+        static let cheer: [Sound] = [.whee, .uiii, .uiiiSlide]    // Juchzen
+        static let whine: [Sound] = [.weeh, .weehEeh]             // Jammern
+        static let fluster: [Sound] = [.oiWorried, .oiExcited]    // Aufregung
 
         case murmur // zufälliges Plappern
         case happy  // fröhlich aufsteigend (Winken)
@@ -76,6 +81,21 @@ final class Voice {
         case ding   // Küchenwecker-Klingeln
         case clap   // Applaus
         case clink  // Tassen anstoßen
+        case uiii       // dunkles "u", dann ein langes, helles "iii"
+        case uiiiSlide  // "uiii", das immer weiter ansteigt (Abrutschen)
+        case huch       // hauchiges "hu" mit kurzem "ch"
+        case huhUch     // zweisilbig "hu-uch"
+        case weeh       // langes, weinerliches "weeeh"
+        case weehEeh    // zweiteiliges Jammern "weeh-eeh"
+        case oiWorried  // fünf schnelle "oi", die tiefer werden
+        case oiExcited  // fünf schnelle "oi", die höher werden
+        case uff        // hauchiges "uff" mit Ausatmen
+        case autsch     // "au" mit kurzem "tsch" (harte Landung nach einem Sturz)
+        case bonk       // Comic-Aufprall gegen Decke oder Bildschirmrand
+        case ohOuh      // langgezogenes Stöhnen (Landung aus großer Höhe)
+        case hmpf       // beleidigtes Schnauben
+        case grrr       // tiefes, rollendes Knurren
+        case naWarte    // "Na warte!"
     }
 
     struct Syllable {
@@ -383,6 +403,90 @@ final class Voice {
             return out
         case .snore:
             return [Syllable(start: 0, duration: 0.7, f0: 190, f1: 150, amp: 0.06, breath: 0.7)]
+        case .uiii:
+            return [
+                Syllable(start: 0, duration: 0.09, f0: 520, f1: 680, amp: 0.2, vibrato: 0, brightness: 0.3),
+                Syllable(start: 0.08, duration: 0.5, f0: 1050, f1: 1250, amp: 0.2, vibrato: 0.04),
+            ]
+        case .uiiiSlide:
+            return [
+                Syllable(start: 0, duration: 0.1, f0: 560, f1: 700, amp: 0.2, vibrato: 0, brightness: 0.3),
+                Syllable(start: 0.09, duration: 0.75, f0: 900, f1: 1450, amp: 0.2, vibrato: 0.05),
+            ]
+        case .huch:
+            return [
+                Syllable(start: 0, duration: 0.12, f0: 760, f1: 980, amp: 0.2, breath: 0.4, vibrato: 0, brightness: 0.6),
+                Syllable(start: 0.11, duration: 0.09, f0: 1000, f1: 900, amp: 0.1, vibrato: 0, brightness: 0.2, hiss: 0.85),
+            ]
+        case .huhUch:
+            return [
+                Syllable(start: 0, duration: 0.09, f0: 820, f1: 1050, amp: 0.2, breath: 0.35, vibrato: 0, brightness: 0.6),
+                Syllable(start: 0.12, duration: 0.14, f0: 1050, f1: 820, amp: 0.2, breath: 0.25, vibrato: 0, brightness: 0.7),
+                Syllable(start: 0.25, duration: 0.08, f0: 900, f1: 850, amp: 0.09, vibrato: 0, brightness: 0.2, hiss: 0.85),
+            ]
+        case .weeh:
+            return [
+                Syllable(start: 0, duration: 0.1, f0: 480, f1: 820, amp: 0.2, vibrato: 0, brightness: 0.5),
+                Syllable(start: 0.09, duration: 0.85, f0: 860, f1: 640, amp: 0.21, breath: 0.15, vibrato: 0.06, brightness: 0.9),
+            ]
+        case .weehEeh:
+            return [
+                Syllable(start: 0, duration: 0.1, f0: 500, f1: 880, amp: 0.2, vibrato: 0, brightness: 0.5),
+                Syllable(start: 0.09, duration: 0.42, f0: 900, f1: 760, amp: 0.21, breath: 0.15, vibrato: 0.07),
+                Syllable(start: 0.53, duration: 0.55, f0: 820, f1: 560, amp: 0.2, breath: 0.2, vibrato: 0.08),
+            ]
+        case .uff:
+            return [
+                Syllable(start: 0, duration: 0.2, f0: 470, f1: 330, amp: 0.22, breath: 0.45, vibrato: 0, brightness: 0.6),
+                Syllable(start: 0.17, duration: 0.12, f0: 300, f1: 280, amp: 0.07, vibrato: 0, brightness: 0.1, hiss: 0.8),
+            ]
+        case .autsch:
+            return [
+                Syllable(start: 0, duration: 0.2, f0: 760, f1: 560, amp: 0.22, vibrato: 0.02, brightness: 0.9),
+                Syllable(start: 0.19, duration: 0.05, f0: 900, f1: 900, amp: 0.12, vibrato: 0, hiss: 0.9),
+                Syllable(start: 0.23, duration: 0.14, f0: 1200, f1: 1100, amp: 0.1, vibrato: 0, brightness: 0.2, hiss: 0.7),
+            ]
+        case .bonk:
+            return [
+                Syllable(start: 0, duration: 0.06, f0: 330, f1: 170, amp: 0.24, vibrato: 0, brightness: 0.2),
+                Syllable(start: 0.07, duration: 0.11, f0: 780, f1: 720, amp: 0.07, vibrato: 0.02, brightness: 0.1),
+            ]
+        case .ohOuh:
+            return [
+                Syllable(start: 0, duration: 0.18, f0: 620, f1: 560, amp: 0.21, vibrato: 0.02, brightness: 0.8),
+                Syllable(start: 0.22, duration: 0.45, f0: 560, f1: 330, amp: 0.21, breath: 0.15, vibrato: 0.05, brightness: 0.7),
+            ]
+        case .hmpf:
+            return [
+                Syllable(start: 0, duration: 0.16, f0: 330, f1: 290, amp: 0.2, vibrato: 0, brightness: 0.15),
+                Syllable(start: 0.15, duration: 0.1, f0: 300, f1: 280, amp: 0.08, vibrato: 0, brightness: 0.1, hiss: 0.75),
+            ]
+        case .grrr:
+            // Dichte Folge winziger, tiefer Silben ergibt ein rollendes "rrr".
+            var out = [Syllable(start: 0, duration: 0.08, f0: 300, f1: 340, amp: 0.16, vibrato: 0, brightness: 0.6)]
+            for i in 0..<16 {
+                let f = 250 - Double(i) * 3
+                out.append(Syllable(start: 0.07 + Double(i) * 0.03, duration: 0.032, f0: f * 1.06, f1: f, amp: 0.24,
+                                    breath: 0.2, vibrato: 0, brightness: 0.9))
+            }
+            return out
+        case .naWarte:
+            return [
+                Syllable(start: 0, duration: 0.09, f0: 470, f1: 500, amp: 0.21, vibrato: 0),
+                Syllable(start: 0.12, duration: 0.13, f0: 640, f1: 620, amp: 0.23, vibrato: 0),
+                Syllable(start: 0.28, duration: 0.16, f0: 470, f1: 380, amp: 0.21, vibrato: 0.02),
+            ]
+        case .oiWorried, .oiExcited:
+            // Fünf schnelle "oi", jedes von unten nach oben gleitend; besorgt sinkend, aufgeregt steigend.
+            let worried = sound == .oiWorried
+            let base: Double = worried ? 760 : 640
+            let step = worried ? 0.96 : 1.07
+            let gap = worried ? 0.04 : 0.03
+            return (0..<5).map { i in
+                let f = base * pow(step, Double(i))
+                return Syllable(start: Double(i) * (0.11 + gap), duration: 0.11, f0: f * 0.8, f1: f * 1.25,
+                                amp: 0.2, vibrato: 0, brightness: 0.8)
+            }
         }
     }
 

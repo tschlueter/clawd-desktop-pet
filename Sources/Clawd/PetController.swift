@@ -29,6 +29,8 @@ final class PetController {
         case landing(remaining: TimeInterval)
         /// In Deckung, solange eine Vollbild-App läuft – und kurz danach (siehe `takeCover`).
         case sheltering
+        /// Das MacBook ist geneigt: Clawd rutscht hangabwärts (siehe `reactToTilt`).
+        case sliding
 
         /// Der Fall ohne seine Werte – zum Erkennen von Zustandswechseln.
         var kind: StateKind {
@@ -49,13 +51,14 @@ final class PetController {
             case .airborne: .airborne
             case .landing: .landing
             case .sheltering: .sheltering
+            case .sliding: .sliding
             }
         }
     }
 
     private enum StateKind {
         case walking, idle, looking, sitting, sleeping, waving, coding, music, sport
-        case encounter, emote, job, dragged, airborne, landing, sheltering
+        case encounter, emote, job, dragged, airborne, landing, sheltering, sliding
     }
 
     let node: ClawdNode
@@ -80,6 +83,21 @@ final class PetController {
     private var direction: CGFloat = 1
     private var surface: Platform.Kind?
     private var walkingOff = false
+    /// Freiwillig vom Dock gehüpft: bis zu diesem Zeitpunkt darf Clawd auf dem Boden daneben bleiben.
+    private var floorVisitUntil: CFTimeInterval?
+    /// Unterwegs zum Dock-Ende, um hinunterzuhüpfen: −1 = links, +1 = rechts.
+    private var hopOffSide: CGFloat?
+    /// Aus dem Schlaf geklickt – nach der Landung gibt es manchmal ein beleidigtes "Hmpf".
+    private var grumpyWake = false
+    private var lastBonk: CFTimeInterval = -100
+
+    /// Beim Werfen gegen Decke oder Bildschirmrand geprallt.
+    private func bonk() {
+        let now = CACurrentMediaTime()
+        guard now - lastBonk > 0.4 else { return }
+        lastBonk = now
+        say(.bonk)
+    }
     private var fallStartY: CGFloat = 0
     private var fallSoundPlayed = false
     /// Entwickler-Hilfe: diesen Clawd ausführlich loggen (nach `debugDrop`).
@@ -145,6 +163,8 @@ final class PetController {
     var activity: Double = 1
     /// Entwickler-Hilfe: nach der nächsten Landung dieses Verhalten starten.
     var debugForce: DemoAction?
+    /// Einmalig nach der ersten Landung aufgerufen (Szenen-Aufnahmen).
+    var onFirstLanding: (() -> Void)?
     private var lastTick = CACurrentMediaTime()
 
     init(world: World, voice: Voice.Channel, pixel: CGFloat, speed: CGFloat) {
@@ -214,6 +234,7 @@ final class PetController {
         // An der Wand geht nur Winken, Umschauen und der Wandsprung – und der nur dort.
         if isOnWall, behavior != .wave, behavior != .look, behavior != .wallJump { return false }
         if behavior == .wallJump, !isOnWall { return false }
+        if behavior == .hopOff, hopOffSides.isEmpty { return false }
         // Diese Verhalten starten auch dann, wenn Clawd schon so dasteht.
         let restartsInPlace = behavior == .wave || behavior == .look || behavior == .sit
         let before = state.kind
@@ -228,6 +249,28 @@ final class PetController {
         pos.x += delta.dx
         pos.y += delta.dy
         if isGroundedState { startFalling(vx: 0) }
+    }
+
+    /// Ein Schritt aus `--script` (Szenen-Aufnahmen): "jump"/"jumpHigh" springt auf eine höhere
+    /// Fläche, "walkLeft"/"walkRight" läuft los, sonst eine Demo-Aktion wie "wave" oder "job:coffee".
+    func runScript(_ step: String) {
+        trace("Skript: \(step)")
+        switch step {
+        case "jump", "jumpHigh":
+            // "jump": auf die nächsthöhere Fläche, "jumpHigh": auf die höchste in Reichweite.
+            let w = spriteSize.width
+            let candidates = (world.windowPlatforms + [world.dockPlatform])
+                .filter { $0.kind != surface && $0.y - pos.y > 20 && $0.y - pos.y < 200 && $0.width > w + 8 }
+            let target = step == "jump" ? candidates.min { $0.y < $1.y } : candidates.max { $0.y < $1.y }
+            if let p = target {
+                jump(to: p, centerX: min(max(centerX, p.minX + w), p.maxX - w))
+            }
+        case "walkLeft", "walkRight":
+            direction = step == "walkLeft" ? -1 : 1
+            state = .walking(remaining: 30)
+        default:
+            if let action = DemoAction(argument: step) { _ = performDemo(action) }
+        }
     }
 
     /// Von der aktuellen Stelle aus fallen lassen (z. B. wenn der Spielplatz geschlossen wird).
@@ -290,7 +333,7 @@ final class PetController {
     private var isGroundedState: Bool {
         switch state {
         case .walking, .idle, .looking, .sitting, .sleeping, .waving, .coding, .music, .sport, .encounter, .emote, .job,
-             .sheltering: true
+             .sheltering, .sliding: true
         default: false
         }
     }
@@ -309,9 +352,13 @@ final class PetController {
         default: break
         }
 
+        reactToTilt(now: now)
+
         switch state {
         case .dragged:
             break // Position kommt aus mouseDragged
+        case .sliding:
+            stepSliding(dt: dt, now: now)
         case .airborne:
             stepPhysics(dt: dt)
         case .sheltering:
@@ -320,6 +367,10 @@ final class PetController {
             let r = remaining - dt
             if r <= 0 {
                 state = .idle(remaining: .random(in: 0.4...1.2))
+                if let landed = onFirstLanding {
+                    onFirstLanding = nil
+                    landed()
+                }
                 if coverMissed {
                     // Während des Vollbilds in der Luft gewesen: das Verstecken jetzt nachholen.
                     knockedOut = false
@@ -402,7 +453,7 @@ final class PetController {
             if case .window(let id) = kind, !walkingOff, world.windowFrames[id] != nil {
                 yankedFall = true
                 startFalling(vx: 0)
-                say(.eep)
+                say(oneOf: Voice.Sound.startled)
                 return
             }
             startFalling(vx: 0)
@@ -430,7 +481,7 @@ final class PetController {
             if magneticShoes, !homing, !walkingOff, let wall = climbableWall(from: oldFront),
                Double.random(in: 0..<1) < 0.5 {
                 enterWall(id: wall.id, side: wall.side, y: pos.y + spriteSize.width / 2, goingDown: false)
-                trace("klettert hoch an Fenster \(wall.id)")
+                trace(World.isScreenEdge(wall.id) ? "klettert hoch am Bildschirmrand" : "klettert hoch an Fenster \(wall.id)")
                 return
             }
             let r = remaining - dt
@@ -503,10 +554,62 @@ final class PetController {
         if r <= 0 { chooseNext() } else { state = make(r) }
     }
 
-    /// Auf dem Boden des Dock-Bildschirms will Clawd zurück aufs Dock.
+    /// Auf dem Boden des Dock-Bildschirms will Clawd zurück aufs Dock – außer er ist gerade
+    /// freiwillig hinuntergehüpft und hat noch Lust, sich dort umzusehen.
     private func isHomingFloor(_ kind: Platform.Kind) -> Bool {
-        if case .floor(let i) = kind, i == world.dockScreenIndex { return true }
-        return false
+        guard case .floor(let i) = kind, i == world.dockScreenIndex else { return false }
+        if let until = floorVisitUntil, CACurrentMediaTime() < until { return false }
+        return true
+    }
+
+    /// Bodenstück direkt neben dem Dock (−1 = links, +1 = rechts), auf das Clawd hinunterhüpfen kann.
+    private func floorBesideDock(_ side: CGFloat) -> Platform? {
+        guard let i = world.dockScreenIndex else { return nil }
+        let d = world.dock
+        return world.floorPlatforms.first {
+            $0.kind == .floor(i) && (side < 0 ? abs($0.maxX - d.minX) < 2 : abs($0.minX - d.maxX) < 2)
+        }
+    }
+
+    /// Seiten, auf denen neben dem Dock genug Platz zum Herumlaufen ist.
+    private var hopOffSides: [CGFloat] {
+        guard surface == .dock, world.dock.isDock else { return [] }
+        return [-1, 1].filter { (floorBesideDock($0)?.width ?? 0) >= 2 * spriteSize.width }
+    }
+
+    /// Zum Dock-Ende laufen; dort hüpft er hinunter (siehe `handleEdges`).
+    private func startHopOff() -> Bool {
+        // Zum näheren Ende – quer über das ganze Dock wäre ein langer Marsch.
+        let d = world.dock
+        guard let side = hopOffSides.min(by: { abs(($0 < 0 ? d.minX : d.maxX) - centerX) < abs(($1 < 0 ? d.minX : d.maxX) - centerX) })
+        else { return false }
+        hopOffSide = side
+        direction = side
+        let end = side < 0 ? world.dock.minX : world.dock.maxX
+        state = .walking(remaining: Double(abs(end - centerX) / max(speed, 1)) + 3)
+        trace("will vom Dock hüpfen (\(side < 0 ? "links" : "rechts"))")
+        return true
+    }
+
+    /// Vom Dock-Ende in einem kleinen Bogen auf den Boden daneben – nie vor die Symbole.
+    private func hopOffDock(side: CGFloat) {
+        hopOffSide = nil
+        guard let floor = floorBesideDock(side) else { return }
+        let w = spriteSize.width
+        let edge = side < 0 ? floor.maxX : floor.minX
+        let tx = min(max(edge + side * w * .random(in: 1.5...3), floor.minX + w / 2), floor.maxX - w / 2)
+        let vy: CGFloat = 320
+        let drop = max(pos.y - floor.y, 0)
+        let flight = (vy + sqrt(vy * vy + 2 * gravity * drop)) / gravity
+        // Bis er wieder auf Dock-Höhe ist, muss der Körper ganz am Dock vorbei sein.
+        let clear = w * 1.2 / (2 * vy / gravity)
+        let vx = side * max(abs(tx - centerX) / flight, clear)
+        floorVisitUntil = CACurrentMediaTime() + .random(in: 25...75)
+        trace(String(format: "hüpft vom Dock, bleibt %.0f s unten", floorVisitUntil! - CACurrentMediaTime()))
+        startFalling(vx: vx)
+        fallSoundPlayed = true // gewollter Hüpfer: nur "Hop", kein Juchzer im Fallen
+        velocity.dy = vy
+        say(.hop)
     }
 
     private func handleEdges(_ platform: Platform, homing: Bool) {
@@ -533,6 +636,21 @@ final class PetController {
         let atRight = pos.x >= hi && direction > 0
         guard atLeft || atRight else { return }
 
+        // Am gewünschten Dock-Ende angekommen: hinunterhüpfen.
+        if platform.kind == .dock, let side = hopOffSide, side == direction {
+            hopOffDock(side: side)
+            return
+        }
+        // Beim Herumlaufen unten am Dock angestoßen: manchmal schon wieder hinauf.
+        if case .floor(let i) = platform.kind, i == world.dockScreenIndex, world.dock.isDock,
+           (atRight && abs(platform.maxX - world.dock.minX) < 2) || (atLeft && abs(platform.minX - world.dock.maxX) < 2),
+           Double.random(in: 0..<1) < 0.3 {
+            floorVisitUntil = nil
+            let d = world.dock
+            jump(to: world.dockPlatform, centerX: atRight ? d.minX + spriteSize.width : d.maxX - spriteSize.width)
+            return
+        }
+
         // Mit Magnetschuhen um die Ecke auf die Seitenkante des Fensters.
         if magneticShoes, case .window(let id) = platform.kind, let f = world.windowFrames[id],
            world.isEdgeVisible(id, at: CGPoint(x: atLeft ? f.minX : f.maxX, y: f.maxY - spriteSize.width)) {
@@ -549,6 +667,7 @@ final class PetController {
     }
 
     private func chooseNext() {
+        hopOffSide = nil
         if debugForce != nil {
             let before = state.kind
             applyDebugForce()
@@ -608,6 +727,8 @@ final class PetController {
             (jump == nil ? 0 : 0.08 * a, { [unowned self] in
                 if let (platform, x) = jump { self.jump(to: platform, centerX: x) }
             }),
+            // Gelegentlich vom Dock hinunter, um sich unten umzusehen.
+            (hopOffSides.isEmpty ? 0 : 0.04 * a, { [unowned self] in _ = self.startHopOff() }),
             (0.15 / a, { [unowned self] in
                 self.state = .idle(remaining: .random(in: 2...6) / a)
                 if self.chatty(0.3) { self.voice.play(.murmur) }
@@ -739,6 +860,12 @@ final class PetController {
         case .rope: startSport(.rope)
         case .wallJump:
             if !startWallJumps() { trace("Wandsprung: kein Fenster in Sprungweite") }
+        case .hopOff:
+            if !startHopOff() { trace("Vom Dock hüpfen: nicht auf dem Dock oder kein Platz daneben") }
+        case .slide:
+            // Neigung vorspielen: 2,5 s lang, als würde das MacBook zur Seite gekippt.
+            demoTilt = Bool.random() ? 0.4 : -0.4
+            demoTiltUntil = CACurrentMediaTime() + 2.5
         }
     }
 
@@ -793,6 +920,7 @@ final class PetController {
         }
         surface = nil
         walkingOff = false
+        hopOffSide = nil
         fallSoundPlayed = false
         velocity = CGVector(dx: vx, dy: 0)
         fallStartY = pos.y
@@ -813,6 +941,8 @@ final class PetController {
     private func stepPhysics(dt: TimeInterval) {
         let t = CGFloat(dt)
         velocity.dy -= gravity * t
+        // Geneigtes MacBook: die Schwerkraft zieht auch ein Stück zur Seite.
+        if abs(effectiveTilt) > 0.05 { velocity.dx += CGFloat(effectiveTilt) * gravity * t }
         let prev = pos
         var next = CGPoint(x: pos.x + velocity.dx * t, y: pos.y + velocity.dy * t)
         let w = spriteSize.width
@@ -821,11 +951,13 @@ final class PetController {
         // Seitlich nur innerhalb der Bildschirme: Mitte zurück auf den nächsten Bildschirm holen.
         if world.screen(containingX: next.x + w / 2) == nil, let s = world.nearestScreen(toX: next.x + w / 2) {
             next.x = min(max(next.x, s.frame.minX), s.frame.maxX - w)
+            if abs(velocity.dx) > 300 { bonk() }
             velocity.dx = -velocity.dx * wallBounce
         }
         // Decke
         if let s = world.screen(containingX: next.x + w / 2), next.y > s.frame.maxY - h {
             next.y = s.frame.maxY - h
+            if velocity.dy > 200 { bonk() }
             velocity.dy = min(velocity.dy, 0)
         }
         // Seitlich gegen den Dock-Block (beim Hochspringen hochrutschen, sonst abprallen)
@@ -839,7 +971,7 @@ final class PetController {
             let cy = next.y + h / 2
             let half = h / 2 // Körper ragt quer zur Wand eine halbe Sprite-Höhe heraus
             let pcx = prev.x + w / 2, ncx = next.x + w / 2
-            for (id, f) in world.windowFrames where cy > f.minY + w / 2 && cy < f.maxY - w / 2 {
+            for (id, f) in world.wallFrames where cy > f.minY + w / 2 && cy < f.maxY - w / 2 {
                 if pcx + half <= f.minX, ncx + half > f.minX, world.isEdgeVisible(id, at: CGPoint(x: f.minX, y: cy)) {
                     stickToWall(id: id, side: -1, y: cy); return
                 }
@@ -864,12 +996,16 @@ final class PetController {
 
         if !fallSoundPlayed, velocity.dy < -250, fallStartY - pos.y > 30 {
             fallSoundPlayed = true
-            say(.whee)
+            say(oneOf: Voice.Sound.cheer)
         }
 
         // Sicherheitsnetz: nie unter den Bildschirm fallen
         if let floor = world.nearestScreen(toX: centerX)?.frame.minY, pos.y < floor - 1 {
             pos.y = floor
+            // Unter dem Dock gibt es keinen Boden (z. B. weil das Dock gewachsen ist): obendrauf.
+            if world.dock.isDock, overlapsDock(pos.x), !world.floorPlatforms.contains(where: { $0.y == floor && $0.contains(x: centerX) }) {
+                land(on: world.dockPlatform, x: pos.x)
+            }
         }
     }
 
@@ -881,13 +1017,26 @@ final class PetController {
             if fallStartY - p.y > 50 { knockedOut = true } // kleine Hopser zählen nicht
         }
         surface = p.kind
+        if case .floor = p.kind {} else { floorVisitUntil = nil }
         walkingOff = false
         velocity = .zero
         let w = spriteSize.width
         pos.x = p.kind == .dock ? min(max(x, p.minX), max(p.minX, p.maxX - w)) : x
         pos.y = p.y
         distanceWalked = 0
-        if fallStartY - p.y > 120 { say(.oof) }
+        // Aufprall: nach einem Sturz "Autsch", aus großer Höhe ein Stöhnen, sonst "Oof".
+        let height = fallStartY - p.y
+        if knockedOut, height > 30 {
+            say(.autsch)
+        } else if height > 400 {
+            say(.ohOuh)
+        } else if height > 120 {
+            say(.oof)
+        }
+        if grumpyWake {
+            grumpyWake = false
+            if Double.random(in: 0..<1) < 0.6 { say(.hmpf) } // aus dem Schlaf geklickt
+        }
         state = .landing(remaining: 0.25)
     }
 
@@ -937,12 +1086,13 @@ final class PetController {
                 grabOffset = CGVector(dx: spriteSize.width / 2, dy: spriteSize.height / 2)
             }
             surface = nil
+            floorVisitUntil = nil
             velocity = .zero
             state = .dragged
             wallJumpsLeft = 0
             NSCursor.closedHand.push()
             beginEvent()
-            say(.eep)
+            say(oneOf: Voice.Sound.startled)
         }
 
         let s = world.screen(containingX: p.x, y: p.y)?.frame ?? NSRect(x: p.x - 1000, y: p.y - 1000, width: 2000, height: 2000)
@@ -956,7 +1106,7 @@ final class PetController {
             // Heftig durchgeschüttelt: ab jetzt benommen, nach dem Absetzen wird geschimpft.
             shakenWhileDragged = true
             trace("am Mauszeiger durchgeschüttelt")
-            say(.eep)
+            say(.oiExcited)
         }
         updateMagnet()
         place()
@@ -1017,7 +1167,8 @@ final class PetController {
         if case .sleeping = state {
             startFalling(vx: 0)
             velocity.dy = 600
-            say(.eep)
+            say(oneOf: Voice.Sound.startled)
+            grumpyWake = true
         } else if isGroundedState {
             startFalling(vx: 0)
             velocity.dy = 520
@@ -1099,6 +1250,10 @@ final class PetController {
             node.sprite = velocity.dy < -250 ? ClawdSprite.flail : ClawdSprite.stand
         case .landing:
             node.sprite = ClawdSprite.squash
+        case .sliding:
+            // Rudert mit den Armen, schaut bergauf und wackelt beim Rutschen.
+            node.sprite = ClawdSprite.flail
+            node.liftPixels = slideSpeed != 0 && Int(now / 0.1) % 2 == 0 ? 0.5 : 0
         case .sheltering:
             node.sprite = ClawdSprite.coverFrame(sinceRelease: shelterReleased.map { now - $0 })
         case .sport(let kind, _):
@@ -1196,16 +1351,19 @@ final class PetController {
             if t >= 3.0 { state = .idle(remaining: .random(in: 0.6...1.2)) }
         case .dizzy:
             // Benommen (Vögelchen) → aufrappeln → den Nutzer beschimpfen
-            if t < 3.5 {
+            if t < 3.2 {
                 let chirp = Int(t / 0.9)
                 if cue("tweet\(chirp)") { say(.tweet) }
-            } else if t >= 4.3 {
+            } else if t < 4.3 {
+                // Beim Aufrappeln manchmal erst jammern …
+                if cue("whine"), Bool.random() { say(oneOf: Voice.Sound.whine) }
+            } else {
                 if cue("face") {
                     // Zum Mauszeiger drehen – da ist der Schuldige!
                     direction = NSEvent.mouseLocation.x < centerX ? -1 : 1
                 }
                 if cue("scold1") { say(.scold) }
-                if t >= 5.6, cue("scold2") { say(.scold) }
+                if t >= 5.6, cue("scold2") { say(oneOf: [.scold, .naWarte]) }
             }
             if t >= 7.0 { state = .idle(remaining: .random(in: 0.8...1.5)) }
         case .yawn:
@@ -1264,6 +1422,92 @@ final class PetController {
         }
     }
 
+    // MARK: - Neigung (Beschleunigungssensor)
+
+    /// Querneigung des MacBooks in g, von der Bühne gesetzt: > 0 = rechte Seite tiefer.
+    var tilt: Double = 0
+    /// Vorgespielte Neigung aus dem Demo-Menü.
+    private var demoTilt: Double = 0
+    private var demoTiltUntil: CFTimeInterval = 0
+    private var effectiveTilt: Double { CACurrentMediaTime() < demoTiltUntil ? demoTilt : tilt }
+
+    /// Ab dieser Neigung (≈ 10°) rutscht Clawd los, ab ≈ 20° auch mitten aus einer Beschäftigung.
+    static let slideStart = 0.17
+    static let slideBusy = 0.35
+    /// Haftreibung (pt/s²): Unterhalb von etwa 7° Neigung bleibt er stehen.
+    static let slideFriction: CGFloat = 300
+
+    private var slideSpeed: CGFloat = 0
+    private var slideDistance: CGFloat = 0
+    private var lastSlideSound: CFTimeInterval = -100
+
+    /// Ist das MacBook genug geneigt, verliert Clawd den Halt. Magnetschuhe an der Wand halten.
+    private func reactToTilt(now: CFTimeInterval) {
+        let tilt = effectiveTilt
+        guard abs(tilt) >= Self.slideStart, surface != nil, !isOnWall else { return }
+        switch state {
+        case .walking, .idle, .looking, .sitting, .sleeping, .waving:
+            break
+        case .coding, .music, .sport, .emote, .job, .encounter:
+            guard abs(tilt) >= Self.slideBusy else { return }
+            encounter?.abort()
+            job?.cleanup()
+            job = nil
+        default:
+            return
+        }
+        beginEvent()
+        hopOffSide = nil
+        slideSpeed = 0
+        slideDistance = 0
+        state = .sliding
+        trace(String(format: "rutscht los (Neigung %.2f g)", tilt))
+        if now - lastSlideSound > 4 {
+            lastSlideSound = now
+            say(oneOf: [.uiiiSlide, .uiii])
+        }
+    }
+
+    /// Hangabtrieb gegen Haftreibung. Am Ende eines Fensters oder des Docks rutscht er hinunter,
+    /// am Bildschirmrand und am Dock-Block bleibt er hängen.
+    private func stepSliding(dt: TimeInterval, now: CFTimeInterval) {
+        guard let kind = surface, let platform = world.platform(kind, near: centerX) else {
+            startFalling(vx: slideSpeed)
+            return
+        }
+        let t = CGFloat(dt)
+        let drive = CGFloat(effectiveTilt) * gravity
+        slideSpeed += drive * t
+        let friction = Self.slideFriction * t
+        slideSpeed = abs(slideSpeed) <= friction ? 0 : slideSpeed - friction * (slideSpeed > 0 ? 1 : -1)
+        slideSpeed = min(max(slideSpeed, -900), 900)
+        pos.x += slideSpeed * t
+        pos.y = platform.y
+        slideDistance += abs(slideSpeed * t)
+        if slideSpeed != 0 { direction = slideSpeed > 0 ? -1 : 1 } // rutscht rückwärts, Blick bergauf
+
+        if !platform.contains(x: centerX) {
+            switch kind {
+            case .window, .dock:
+                trace("rutscht über die Kante")
+                startFalling(vx: slideSpeed)
+                return
+            default:
+                break
+            }
+        }
+        let lo = platform.minX, hi = max(platform.minX, platform.maxX - spriteSize.width)
+        if pos.x < lo || pos.x > hi {
+            pos.x = min(max(pos.x, lo), hi)
+            slideSpeed = 0
+        }
+        // Wieder gerade genug, um stehen zu bleiben? Dann verdutzt umschauen.
+        if slideSpeed == 0, abs(drive) < Self.slideFriction {
+            trace(String(format: "rutscht nicht mehr (%.0f pt gerutscht)", slideDistance))
+            state = slideDistance > 30 ? .looking(remaining: 2.4) : .idle(remaining: .random(in: 0.5...1.5))
+        }
+    }
+
     // MARK: - Magnetschuhe (an Fensterseiten laufen)
 
     var magneticShoes = false {
@@ -1311,12 +1555,26 @@ final class PetController {
 
     /// Aktuelle Wand (live aus dem Fensterrahmen); Fußpunkt bewegt sich zwischen minY und maxY.
     private var wall: WallGeometry? {
-        guard case .wall(let id, let side) = surface, let f = world.windowFrames[id] else { return nil }
+        guard case .wall(let id, let side) = surface, let f = world.wallFrames[id] else { return nil }
         let half = spriteSize.width / 2
-        let screen = world.screen(containingX: f.midX, y: f.midY)
-        let bottom = max(f.minY, screen?.visibleFrame.minY ?? f.minY)
-        let top = min(f.maxY, screen?.visibleFrame.maxY ?? f.maxY)
-        return WallGeometry(id: id, side: side, frame: f, x: side < 0 ? f.minX : f.maxX,
+        let x = side < 0 ? f.minX : f.maxX
+        var bottom: CGFloat
+        let top: CGFloat
+        if World.isScreenEdge(id) {
+            // Bildschirmrand: unten bis zum Boden – außer das Dock reicht bis hierher, dann nur bis
+            // zur Dock-Oberkante (nie vor den Symbolen); oben bis unter die Menüleiste.
+            let screen = world.screen(containingX: x + CGFloat(side), y: f.midY)
+            bottom = f.minY
+            let d = world.dock
+            let bodyMin = side > 0 ? x : x - spriteSize.height, bodyMax = bodyMin + spriteSize.height
+            if d.isDock, d.minX < bodyMax, d.maxX > bodyMin, d.y > f.minY, d.y < f.maxY { bottom = d.y }
+            top = min(f.maxY, screen?.visibleFrame.maxY ?? f.maxY)
+        } else {
+            let screen = world.screen(containingX: f.midX, y: f.midY)
+            bottom = max(f.minY, screen?.visibleFrame.minY ?? f.minY)
+            top = min(f.maxY, screen?.visibleFrame.maxY ?? f.maxY)
+        }
+        return WallGeometry(id: id, side: side, frame: f, x: x,
                             minY: bottom + half, maxY: max(bottom + half, top - half))
     }
 
@@ -1341,7 +1599,7 @@ final class PetController {
         }
         let newFront = direction > 0 ? pos.x + spriteSize.width : pos.x
         let half = spriteSize.width / 2
-        return Self.climbableWall(in: world.windowFrames, groundY: pos.y, from: oldFront, to: newFront, direction: direction,
+        return Self.climbableWall(in: world.wallFrames, groundY: pos.y, from: oldFront, to: newFront, direction: direction,
                                   visible: { [world] id, p in world.isEdgeVisible(id, at: CGPoint(x: p.x, y: p.y + half)) })
     }
 
@@ -1378,7 +1636,7 @@ final class PetController {
     }
 
     private func enterWall(id: CGWindowID, side: Int, y: CGFloat, goingDown: Bool) {
-        guard let f = world.windowFrames[id] else { return }
+        guard let f = world.wallFrames[id] else { return }
         if climbingSince == nil { climbingSince = CACurrentMediaTime() }
         surface = .wall(id, side)
         pos = CGPoint(x: side < 0 ? f.minX : f.maxX, y: y)
@@ -1394,7 +1652,7 @@ final class PetController {
     private func wallJumpTarget(rise: CGFloat = 0) -> (id: CGWindowID, gap: CGFloat)? {
         guard let g = wall else { return nil }
         return Self.wallJumpTarget(from: g.x, side: g.side, footY: pos.y + rise, selfID: g.id,
-                                   windows: world.windowFrames, margin: spriteSize.width / 2,
+                                   windows: world.wallFrames, margin: spriteSize.width / 2,
                                    visible: { [world] id, p in world.isEdgeVisible(id, at: p) })
     }
 
@@ -1473,7 +1731,7 @@ final class PetController {
     private func updateMagnet() {
         guard magneticShoes, isDragging else { magnet = nil; return }
         let body = NSRect(x: pos.x, y: pos.y, width: spriteSize.width, height: spriteSize.height)
-        magnet = Self.magnetTarget(body: body, windows: world.windowFrames, reach: Self.magnetReach,
+        magnet = Self.magnetTarget(body: body, windows: world.wallFrames, reach: Self.magnetReach,
                                    margin: spriteSize.width / 2,
                                    visible: { [world] id, p in world.isEdgeVisible(id, at: p) })
     }
@@ -1499,7 +1757,7 @@ final class PetController {
 
     /// Magnetwellen laufen von den Schuhen zur Kante – mehr, je näher sie ist.
     private func drawMagnetWaves(now: CFTimeInterval) {
-        guard let m = magnet, let f = world.windowFrames[m.id] else { hideMagnetWaves(); return }
+        guard let m = magnet, let f = world.wallFrames[m.id] else { hideMagnetWaves(); return }
         let edgeX = m.side < 0 ? f.minX : f.maxX
         let from = m.side < 0 ? pos.x + spriteSize.width - 2 * pixel : pos.x + 2 * pixel
         let scale = pixel * 0.6
@@ -1560,7 +1818,7 @@ final class PetController {
             shake.reset()
             startFalling(vx: CGFloat(g.side) * 160)
             velocity.dy = 220
-            say(.eep)
+            say(oneOf: [.eep, .weehEeh])
             return
         }
         pos.x = g.x // fährt mit, wenn das Fenster verschoben wird
@@ -1647,7 +1905,11 @@ final class PetController {
     var spriteWidth: CGFloat { spriteSize.width }
 
     /// Entwickler-Hilfe: Begegnungen sofort erlauben.
-    func allowEncountersNow() { nextEncounterAllowed = 0 }
+    /// Sofort für Begegnungen bereit – auch ohne die ruhige Phase nach dem Start abzuwarten.
+    func allowEncountersNow() {
+        nextEncounterAllowed = 0
+        calmUntil = 0
+    }
 
     /// Kurz nicht für Begegnungen in Frage kommen (z. B. wenn der Zufall "nein" sagte).
     func snoozeEncounters(for seconds: TimeInterval) {
@@ -1714,6 +1976,11 @@ final class PetController {
 
     /// Laut des laufenden Ereignisses – nur wenn es hörbar ist. Spontanes Plappern läuft
     /// stattdessen über `chatty(_:)` und wird dort mit der vollen Gesprächigkeit skaliert.
+    /// Einer von mehreren passenden Lauten, zufällig gewählt (siehe `Voice.Sound.startled` usw.).
+    func say(oneOf sounds: [Voice.Sound]) {
+        if let sound = sounds.randomElement() { say(sound) }
+    }
+
     func say(_ sound: Voice.Sound) {
         trace("laut: \(sound)" + (eventAudible ? "" : " (stumm)"))
         guard eventAudible else { return }

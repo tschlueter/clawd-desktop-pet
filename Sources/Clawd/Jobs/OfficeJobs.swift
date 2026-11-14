@@ -55,7 +55,7 @@ final class PrinterJob: Job {
         case 4:
             // Papierflut
             drawPrinter(jammed: false, now: now)
-            if once("flood") { c.say(.print); c.say(.eep) }
+            if once("flood") { c.say(.print); c.say(oneOf: [.eep, .oiExcited, .weeh]) }
             pose = Encounter.Pose(sprite: ClawdSprite.flail, particles: .paper)
             if t >= 1.6 { next(now) }
         default:

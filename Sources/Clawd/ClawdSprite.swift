@@ -1303,19 +1303,19 @@ enum ClawdSprite {
     static let arrow: Frame = ["u.....", "uooooK", "u....."]
     static let stuckArrow: Frame = ["u..", "uoo", "u.."]
 
-    /// Zielscheibe auf einem Ständer: drei rote und weiße Ringe, gelbes Zentrum.
+    /// Zielscheibe aus Stroh auf einem Ständer: außen blau, in der Mitte strohgelb, rotes Zentrum.
     static let target: Frame = [
-        "...uuuuu...",
-        "..uwwwwwu..",
-        ".uwuuuuuwu.",
-        "uwuwwwwwuwu",
-        "uwuwuuuwuwu",
-        "uwuwukuwuwu",
-        "uwuwuuuwuwu",
-        "uwuwwwwwuwu",
-        ".uwuuuuuwu.",
-        "..uwwwwwu..",
-        "...uuuuu...",
+        "...iiiii...",
+        "..iIIIIIi..",
+        ".iIAAAAAIi.",
+        "iIAFFFFFAIi",
+        "iIAFuuuFAIi",
+        "iIAFujuFAIi",
+        "iIAFuuuFAIi",
+        "iIAFFFFFAIi",
+        ".iIAAAAAIi.",
+        "..iIIIIIi..",
+        "...iiiii...",
         ".....H.....",
         "....H.H....",
         "...H...H...",
