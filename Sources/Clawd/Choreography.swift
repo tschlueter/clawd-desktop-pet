@@ -66,14 +66,15 @@ final class EffectLayers {
     /// Sprite-Frame zeigen; `scale` = Kantenlänge eines Sprite-Pixels.
     /// - Parameter shadow: leichter Schatten entlang der Kontur, damit helle Requisiten auch auf weißem
     ///   Hintergrund erkennbar bleiben.
+    /// - Parameter behind: hinter den Clawds (z. B. ein Fernseher, vor dem er sitzt).
     func show(_ key: String, _ frame: ClawdSprite.Frame, origin: CGPoint, scale: CGFloat, opacity: Float = 1,
-              mirrored: Bool = false, shadow: Bool = false) {
+              mirrored: Bool = false, shadow: Bool = false, behind: Bool = false) {
         let l = layer(key)
         l.contents = ClawdSprite.cgImage(frame, mirrored: mirrored)
         l.bounds = CGRect(x: 0, y: 0, width: CGFloat(frame[0].count) * scale, height: CGFloat(frame.count) * scale)
         l.opacity = opacity
         Self.applyShadow(shadow, to: l, scale: scale)
-        stage?.place(layer: l, origin: CGPoint(x: origin.x.rounded(), y: origin.y.rounded()))
+        stage?.place(layer: l, origin: CGPoint(x: origin.x.rounded(), y: origin.y.rounded()), behindClawds: behind)
     }
 
     /// Sprite-Frame um seinen Mittelpunkt `center` gedreht zeigen (z. B. ein Pfeil entlang seiner Flugbahn).

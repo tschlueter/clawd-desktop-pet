@@ -52,7 +52,7 @@ No spoilers! Here's just how many little scenes there are in each group — disc
 | | Group | Scenes |
 |---|---|---:|
 | 👋 | Gestures & States | 10 |
-| 🪁 | Free Time & Sports | 9 |
+| 🪁 | Free Time & Sports | 11 |
 | ☕ | Everyday | 9 |
 | 🔨 | Crafts | 5 |
 | 💻 | Programming | 11 |
@@ -60,8 +60,8 @@ No spoilers! Here's just how many little scenes there are in each group — disc
 | 🖨️ | Office | 5 |
 | 🎧 | Focus & Stress | 4 |
 | 🤝 | Encounters *(two Clawds)* | 9 |
-| 👥 | Team Scenes *(two Clawds)* | 5 |
-| | **Total** | **75** |
+| 👥 | Team Scenes *(two Clawds)* | 6 |
+| | **Total** | **78** |
 
 ## 📦 Installation
 

@@ -117,7 +117,8 @@ final class Stage {
     }
 
     /// Beliebigen Layer (anchorPoint 0,0) global platzieren, z. B. Clawds Tennisball.
-    func place(layer: CALayer, origin: CGPoint) {
+    /// - Parameter behindClawds: unter allen Clawds einsortieren (z. B. ein Fernseher, vor dem einer sitzt).
+    func place(layer: CALayer, origin: CGPoint, behindClawds: Bool = false) {
         let size = layer.bounds.size
         let center = CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
         guard let overlay = overlay(for: center) else { return }
@@ -125,6 +126,13 @@ final class Stage {
         if layer.superlayer !== overlay.root {
             layer.removeFromSuperlayer()
             overlay.root.addSublayer(layer)
+        }
+        if behindClawds, let sublayers = overlay.root.sublayers {
+            let clawds = Set(controllers.map { ObjectIdentifier($0.node.layer) })
+            if let first = sublayers.firstIndex(where: { clawds.contains(ObjectIdentifier($0)) }),
+               let mine = sublayers.firstIndex(where: { $0 === layer }), mine > first {
+                overlay.root.insertSublayer(layer, below: sublayers[first])
+            }
         }
         let local = CGPoint(x: origin.x - overlay.frame.minX, y: origin.y - overlay.frame.minY)
         if layer.position != local { layer.position = local }
@@ -233,6 +241,7 @@ final class Stage {
             switch k {
             case .ballPass: return length >= 260
             case .presentation, .magicMishap: return length >= 150
+            case .rpgNight: return length >= 200
             case .tag, .leapfrog: return length >= 220
             default: return true
             }

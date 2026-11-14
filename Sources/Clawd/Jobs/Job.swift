@@ -74,9 +74,10 @@ class Job {
 
     /// Effekt-Layer auf der Bühne zeigen (Ursprung unten links, global).
     func showEffect(_ key: String, _ frame: ClawdSprite.Frame, origin: CGPoint, scale: CGFloat, opacity: Float = 1,
-                    mirrored: Bool = false, shadow: Bool = false) {
+                    mirrored: Bool = false, shadow: Bool = false, behind: Bool = false) {
         guard !retired else { return }
-        effects.show(key, frame, origin: origin, scale: scale, opacity: opacity, mirrored: mirrored, shadow: shadow)
+        effects.show(key, frame, origin: origin, scale: scale, opacity: opacity, mirrored: mirrored, shadow: shadow,
+                     behind: behind)
     }
 
     /// Effekt um seinen Mittelpunkt gedreht zeigen.
@@ -125,6 +126,7 @@ enum Jobs {
         PrinterJob.self, PostitJob.self, StampJob.self, PomodoroJob.self,
         DeadlinePanicJob.self, NightShiftJob.self, CablesJob.self, ShipItJob.self,
         PaperPlaneJob.self, KiteJob.self, CookingJob.self, ArcheryJob.self, MagicJob.self,
+        ConsoleGamingJob.self, PCGamingJob.self,
         PlanJob.self, TerminalJob.self, SearchJob.self, SubagentsJob.self, ThinkingHatsJob.self,
         SecurityCheckJob.self, DatabaseMigrationJob.self, DashboardJob.self, PrototypeJob.self,
     ]
@@ -138,7 +140,7 @@ enum Jobs {
         "files": 3, "postits": 3, "whiteboard": 3, "windows": 3, "polish": 3,
         "bug": 2, "server": 2, "call": 2, "mail": 2, "water": 2, "hammer": 2,
         "paint": 2, "box": 2, "screw": 2, "cables": 2, "laundry": 2, "night": 2,
-        "plane": 2, "kite": 2, "cook": 2, "archery": 2, "magic": 2,
+        "plane": 2, "kite": 2, "cook": 2, "archery": 2, "magic": 2, "console": 2, "pcgame": 2,
         "plan": 3, "terminal": 3, "search": 3, "subagents": 2, "hats": 2,
         "security": 2, "migration": 2, "dashboard": 2, "prototype": 2,
         "deploy": 1, "fire": 1, "printer": 1, "deadline": 1, "shipit": 1, "trash": 1,
@@ -147,7 +149,7 @@ enum Jobs {
     // MARK: Wochenende
 
     /// Freizeit – am Wochenende häufiger.
-    static let leisure: Set<String> = ["plane", "kite", "cook", "archery", "magic"]
+    static let leisure: Set<String> = ["plane", "kite", "cook", "archery", "magic", "console", "pcgame"]
     /// Haushalt – unabhängig vom Wochentag.
     static let chores: Set<String> = ["windows", "polish", "trash", "water", "laundry", "coffee", "mail"]
     /// Am Wochenende: Freizeit × 2,5, Arbeit × 0,35 (Haushalt bleibt).

@@ -9,6 +9,8 @@ final class Encounter {
     enum Kind: String, CaseIterable {
         case greeting, highFive, hug, dance, tag, leapfrog, ballPass, bump
         case presentation, pairProgramming, tugOfWar, coffeeBreak
+        /// Rollenspielabend: Spielleiter hinter dem Schirm, der andere würfelt.
+        case rpgNight
         /// Zauberpanne: verwandelt den anderen versehentlich in Frosch oder Kaninchen.
         case magicMishap
         /// Brief übergeben – startet nur über die Arbeit "Post austragen".
@@ -53,6 +55,8 @@ final class Encounter {
     private let effects: EffectLayers
     private var starUntil: CFTimeInterval = 0
     private var starPoint = CGPoint.zero
+    /// Rollenspielabend: was der Würfel zeigt (20 = Volltreffer, 1 = Patzer).
+    private let rpgRoll = Bool.random() ? 20 : 1
 
     // Fangen
     private var chaser: PetController
@@ -138,6 +142,7 @@ final class Encounter {
         case .pairProgramming: pairProgramming(now, t, dt)
         case .tugOfWar: tugOfWar(now, t, dt)
         case .coffeeBreak: coffeeBreak(now, t, dt)
+        case .rpgNight: rpgNight(now, t, dt)
         case .magicMishap: magicMishap(now, t, dt)
         }
         updateEffects(now)
@@ -843,4 +848,108 @@ final class Encounter {
     }
 
     private func removeEffects() { effects.removeAll() }
+
+    // MARK: - Rollenspielabend
+
+    private func rpgNight(_ now: CFTimeInterval, _ t: TimeInterval, _ dt: TimeInterval) {
+        let px = a.px, s = px / 2
+        let hat = ClawdSprite.rpgWizardHat
+        guard phase > 0 else {
+            if approach(spacing: 39 * px, dt: dt) { next(now) }
+            return
+        }
+        let mid = (a.center + b.center) / 2
+        let top = a.groundY + CGFloat(ClawdSprite.gameTable.count) * s
+        func at(_ cells: CGFloat, _ bottom: CGFloat) -> CGPoint { CGPoint(x: mid + cells * s, y: bottom) }
+        let rolled = phase >= 5
+        let dragonHop: CGFloat = rolled && rpgRoll == 1 && t < 1.4 ? CGFloat(abs(sin(t * .pi / 0.25))) * 2 * px : 0
+
+        // Tisch mit Schirm, Spielplan, Miniaturen, Charakterbogen und Chips
+        showEffect("table", ClawdSprite.gameTable, origin: at(-32, a.groundY), scale: s)
+        showEffect("map", ClawdSprite.battleMap, origin: at(-9, top - 2 * s), scale: s)
+        showEffect("screen", ClawdSprite.gmScreen, origin: at(-27, top), scale: s)
+        showEffect("snacks", ClawdSprite.snackBowl, origin: at(-8, top), scale: s)
+        showEffect("knight", ClawdSprite.miniKnight, origin: at(10, top), scale: s)
+        showEffect("wizard", ClawdSprite.miniWizard, origin: at(15, top), scale: s)
+        if rolled, rpgRoll == 20 {
+            showEffect("dragon", ClawdSprite.miniDragonFallen, origin: at(20, top), scale: s)
+        } else {
+            showEffect("dragon", ClawdSprite.miniDragon, origin: at(20, top + dragonHop), scale: s)
+        }
+        showEffect("sheet", ClawdSprite.characterSheet, origin: at(24, top - s), scale: s)
+        showEffect("pencil", ClawdSprite.pencil, origin: at(25, top + s), scale: s)
+
+        switch phase {
+        case 1:
+            // Platz nehmen, der Spieler setzt seinen Zauberhut auf
+            set(a, Pose(sprite: ClawdSprite.stand))
+            set(b, Pose(sprite: ClawdSprite.happyStand, hat: hat))
+            if t >= 0.6 { next(now) }
+        case 2:
+            // Der Spielleiter erzählt hinter seinem Schirm, der Spieler lauscht gespannt
+            let turn = Int(t / 1.0)
+            set(a, Pose(sprite: Int(t / 0.5) % 2 == 0 ? ClawdSprite.wave[1] : ClawdSprite.stand, bubble: true))
+            set(b, Pose(sprite: t.truncatingRemainder(dividingBy: 1.5) < 0.25 ? ClawdSprite.blink : ClawdSprite.stand, hat: hat))
+            if once("tell\(turn)"), a.isChatty { a.say(.murmur) }
+            if t >= 3.0 { next(now) }
+        case 3:
+            // Ausholen
+            set(a, Pose(sprite: ClawdSprite.stand))
+            set(b, Pose(sprite: ClawdSprite.wave[1], hat: hat))
+            if t >= 0.5 { next(now) }
+        case 4:
+            // Der Würfel kullert über den Tisch: Bogen, dann zwei kleine Hüpfer
+            let p = CGFloat(min(t / 1.2, 1))
+            let from = CGPoint(x: b.center - 7 * px, y: a.groundY + 7 * px)
+            let land = at(5, top)
+            let x = from.x + (land.x - from.x) * min(p / 0.8, 1)
+            let y: CGFloat
+            if p < 0.55 {
+                let q = p / 0.55
+                y = from.y + (land.y - from.y) * q + 8 * px * sin(.pi * q)
+            } else {
+                let q = (p - 0.55) / 0.45
+                y = land.y + 2.5 * px * abs(sin(.pi * 2 * q)) * (1 - q)
+            }
+            let die = Int(t / 0.08) % 2 == 0 ? ClawdSprite.d20(tumble: true) : ClawdSprite.d20()
+            showEffect("die", die, origin: CGPoint(x: x - 3.5 * s, y: y), scale: s)
+            for (i, at) in [0.55, 0.78, 0.92].enumerated() where p >= CGFloat(at) {
+                if once("bounce\(i)") { b.say(.pock) }
+            }
+            set(a, Pose(sprite: ClawdSprite.stand))
+            set(b, Pose(sprite: ClawdSprite.stand, hat: hat))
+            if t >= 1.3 { next(now) }
+        case 5:
+            showEffect("die", ClawdSprite.d20(face: rpgRoll), origin: at(1.5, top), scale: s)
+            if rpgRoll == 20 {
+                // Volltreffer! Glitzer, beide jubeln, der Drache kippt um
+                if Int(t / 0.15) % 2 == 0, t < 1.2 {
+                    showEffect("sparkle", ClawdSprite.sparkleGlyph, origin: at(1, top + 8 * s), scale: s)
+                } else {
+                    hideEffect("sparkle")
+                }
+                if once("cheer") { b.say(oneOf: Voice.Sound.cheer); a.say(.happy) }
+                let hop = t < 1.2 ? CGFloat(abs(sin(t * .pi / 0.3))) * 1.5 : 0
+                set(a, Pose(sprite: ClawdSprite.happyStand))
+                set(b, Pose(sprite: ClawdSprite.happyStand, lift: hop, hat: hat))
+            } else {
+                // Patzer: Der Drache hüpft bedrohlich, der Spieler erschrickt, der Spielleiter kichert
+                if once("oops") { b.say(oneOf: Voice.Sound.fluster) }
+                if t >= 0.6, once("giggle") { a.say(.giggle) }
+                set(a, Pose(sprite: ClawdSprite.happyStand))
+                set(b, Pose(sprite: ClawdSprite.flail, particles: .sweat, hat: hat))
+            }
+            if t >= 1.8 { next(now) }
+        case 6:
+            // Zur Stärkung in die Chipsschale greifen
+            hideEffect("sparkle")
+            showEffect("die", ClawdSprite.d20(face: rpgRoll), origin: at(1.5, top), scale: s)
+            if once("munch") { a.say(.munch) }
+            set(a, Pose(sprite: Int(t / 0.3) % 2 == 0 ? ClawdSprite.wave[1] : ClawdSprite.happyStand))
+            set(b, Pose(sprite: ClawdSprite.happyStand, hat: hat))
+            if t >= 1.6 { next(now) }
+        default:
+            end(now, walkAway: true)
+        }
+    }
 }

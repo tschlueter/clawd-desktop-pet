@@ -158,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DemoEntry("demo.barbell", .behavior(.barbell)), DemoEntry("demo.rope", .behavior(.rope)),
             DemoEntry("demo.wallJump", .behavior(.wallJump)), DemoEntry("demo.archery", .job(ArcheryJob.self)),
             DemoEntry("demo.magic", .job(MagicJob.self)),
+            DemoEntry("demo.console", .job(ConsoleGamingJob.self)), DemoEntry("demo.pcgame", .job(PCGamingJob.self)),
         ]),
         DemoGroup("demo.everyday", [
             DemoEntry("demo.eat", .job(EatingJob.self)), DemoEntry("demo.cook", .job(CookingJob.self)),
@@ -205,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DemoEntry("demo.presentation", .encounter(.presentation)),
             DemoEntry("demo.pairProgramming", .encounter(.pairProgramming)),
             DemoEntry("demo.tugOfWar", .encounter(.tugOfWar)), DemoEntry("demo.coffeeBreak", .encounter(.coffeeBreak)),
+            DemoEntry("demo.rpgNight", .encounter(.rpgNight)),
             DemoEntry("demo.magicMishap", .encounter(.magicMishap)),
         ]),
     ]

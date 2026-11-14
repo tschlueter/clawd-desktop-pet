@@ -77,6 +77,8 @@ extension ClawdSprite {
             "A": (0xE2, 0xC6, 0x86), // Zielscheibe: Stroh
             "F": (0xC6, 0xA2, 0x5C), // Zielscheibe: Stroh, dunklerer Ring
             "j": (0xA8, 0x2C, 0x2C), // Zielscheibe: Zentrum
+            "7": (0x5A, 0x45, 0xB0), // Sitzsack: Schatten
+            "8": (0x9A, 0x7B, 0xEA), // Sitzsack: Glanz
         ],
         .dark: [
             "K": (0x8C, 0x93, 0x9B),
@@ -128,6 +130,8 @@ extension ClawdSprite {
             "A": (0xEC, 0xD3, 0x98),
             "F": (0xD2, 0xB0, 0x6A),
             "j": (0xC4, 0x3A, 0x3A),
+            "7": (0x6A, 0x55, 0xC4),
+            "8": (0xB0, 0x96, 0xF4),
         ],
     ]
 
