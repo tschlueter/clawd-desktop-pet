@@ -967,15 +967,18 @@ final class PetController {
         }
 
         // Magnetschuhe: seitlich gegen ein Fenster geflogen? Festhaften!
-        if magneticShoes, !knockedOut {
+        if magneticShoes, !knockedOut, CACurrentMediaTime() >= magnetPauseUntil {
             let cy = next.y + h / 2
             let half = h / 2 // Körper ragt quer zur Wand eine halbe Sprite-Höhe heraus
             let pcx = prev.x + w / 2, ncx = next.x + w / 2
+            let screens = world.screens.map(\.frame)
             for (id, f) in world.wallFrames where cy > f.minY + w / 2 && cy < f.maxY - w / 2 {
-                if pcx + half <= f.minX, ncx + half > f.minX, world.isEdgeVisible(id, at: CGPoint(x: f.minX, y: cy)) {
+                if pcx + half <= f.minX, ncx + half > f.minX, world.isEdgeVisible(id, at: CGPoint(x: f.minX, y: cy)),
+                   Self.wallHasRoom(x: f.minX, side: -1, depth: h, y: cy, screens: screens) {
                     stickToWall(id: id, side: -1, y: cy); return
                 }
-                if pcx - half >= f.maxX, ncx - half < f.maxX, world.isEdgeVisible(id, at: CGPoint(x: f.maxX, y: cy)) {
+                if pcx - half >= f.maxX, ncx - half < f.maxX, world.isEdgeVisible(id, at: CGPoint(x: f.maxX, y: cy)),
+                   Self.wallHasRoom(x: f.maxX, side: 1, depth: h, y: cy, screens: screens) {
                     stickToWall(id: id, side: 1, y: cy); return
                 }
             }
@@ -1021,7 +1024,11 @@ final class PetController {
         walkingOff = false
         velocity = .zero
         let w = spriteSize.width
-        pos.x = p.kind == .dock ? min(max(x, p.minX), max(p.minX, p.maxX - w)) : x
+        // Dock und Boden: ganz auf der Fläche (am Bildschirmrand nicht halb hinausragen).
+        switch p.kind {
+        case .dock, .floor: pos.x = min(max(x, p.minX), max(p.minX, p.maxX - w))
+        default: pos.x = x
+        }
         pos.y = p.y
         distanceWalked = 0
         // Aufprall: nach einem Sturz "Autsch", aus großer Höhe ein Stöhnen, sonst "Oof".
@@ -1519,6 +1526,8 @@ final class PetController {
 
     /// Abgeschüttelt und im Fallen – nach der Landung erst mal benommen.
     private var knockedOut = false
+    /// Bis dahin greifen die Magnetschuhe im Flug nicht (nach dem Abrutschen von einer Kante).
+    private var magnetPauseUntil: CFTimeInterval = 0
     /// Fenster wurde unter ihm weggezogen – bei einem richtigen Sturz danach benommen.
     private var yankedFall = false
     private var shake = ShakeDetector()
@@ -1588,6 +1597,13 @@ final class PetController {
     private func wallToUpright() {
         let c = wallBodyCenter
         pos = CGPoint(x: c.x - spriteSize.width / 2, y: c.y - spriteSize.height / 2)
+    }
+
+    /// Reine Geometrie: Liegt der Körper (ragt `depth` von der Kante in Richtung `side` ab) noch auf
+    /// einem Bildschirm?
+    static func wallHasRoom(x: CGFloat, side: Int, depth: CGFloat, y: CGFloat, screens: [NSRect]) -> Bool {
+        let cx = x + CGFloat(side) * depth / 2
+        return screens.contains { cx >= $0.minX && cx < $0.maxX && y >= $0.minY && y <= $0.maxY }
     }
 
     /// Fensterkante, die Clawd beim Laufen auf Boden oder Dock gerade erreicht hat: Das Fenster muss
@@ -1823,6 +1839,15 @@ final class PetController {
         }
         pos.x = g.x // fährt mit, wenn das Fenster verschoben wird
         pos.y = min(max(pos.y, g.minY), g.maxY)
+        // Fenster bis an den Bildschirmrand gezogen (z. B. maximiert)? Dann ist neben der Kante kein
+        // Platz mehr für den Körper – loslassen und herunterfallen.
+        guard Self.wallHasRoom(x: g.x, side: g.side, depth: spriteSize.height, y: pos.y,
+                               screens: world.screens.map(\.frame)) else {
+            trace("kein Platz mehr neben der Fensterkante")
+            magnetPauseUntil = now + 1.2 // erst mal richtig herunterfallen, nicht gleich wieder andocken
+            startFalling(vx: CGFloat(-g.side) * 60)
+            return
+        }
         // Ein anderes Fenster hat sich davorgeschoben? Dann hält nichts mehr – herunterfallen.
         guard world.isEdgeVisible(g.id, at: CGPoint(x: g.x, y: pos.y)) else {
             startFalling(vx: CGFloat(g.side) * 60)

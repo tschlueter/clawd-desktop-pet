@@ -798,3 +798,25 @@ struct SeededRandom: RandomNumberGenerator {
         #expect(PetController.slideBusy > PetController.slideStart)
     }
 }
+
+// MARK: - Wand am Bildschirmrand
+
+@Suite struct WallRoomTests {
+    let screens = [NSRect(x: 0, y: 0, width: 1800, height: 1169)]
+
+    @Test func windowSideInsideTheScreenHolds() {
+        #expect(PetController.wallHasRoom(x: 600, side: -1, depth: 48, y: 400, screens: screens))
+        #expect(PetController.wallHasRoom(x: 1100, side: 1, depth: 48, y: 400, screens: screens))
+    }
+
+    @Test func maximizedWindowPushesHimOffTheScreen() {
+        // Fenster auf volle Breite gezogen: die linke Seite liegt bei x = 0, der Körper ragt hinaus.
+        #expect(!PetController.wallHasRoom(x: 0, side: -1, depth: 48, y: 400, screens: screens))
+        #expect(!PetController.wallHasRoom(x: 1800, side: 1, depth: 48, y: 400, screens: screens))
+    }
+
+    @Test func neighbourScreenGivesRoom() {
+        let two = screens + [NSRect(x: -1440, y: 0, width: 1440, height: 900)]
+        #expect(PetController.wallHasRoom(x: 0, side: -1, depth: 48, y: 400, screens: two))
+    }
+}
