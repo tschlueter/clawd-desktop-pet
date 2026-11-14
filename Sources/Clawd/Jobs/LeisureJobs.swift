@@ -228,17 +228,29 @@ final class CookingJob: Job {
     private var stoveX: CGFloat = 0
     private var scale: CGFloat { px * 0.75 }
 
-    private func drawStove(_ now: CFTimeInterval) {
+    private func drawStove(_ now: CFTimeInterval, steam: Bool = true) {
         let frame = ClawdSprite.stove[Int(now / 0.15) % ClawdSprite.stove.count]
         let w = CGFloat(frame[0].count) * scale
         showEffect("stove", frame, origin: CGPoint(x: stoveX - w / 2, y: c.groundY), scale: scale)
+        guard steam else { return }
+        // Dampf steigt aus dem Topf auf: drei Fäden, versetzt, die beim Aufsteigen verblassen.
+        let glyph = ClawdSprite.steamGlyph
+        let s = px * 0.5
+        let potTop = c.groundY + CGFloat(frame.count) * scale
+        for k in 0..<3 {
+            let p = CGFloat((now / 1.6 + Double(k) / 3).truncatingRemainder(dividingBy: 1))
+            let x = stoveX + CGFloat(k - 1) * 1.5 * px - CGFloat(glyph[0].count) * s / 2
+                + (sin(p * .pi * 2) * 0.5).rounded() * px
+            showEffect("steam\(k)", glyph, origin: CGPoint(x: x, y: potTop + (p * 6).rounded() * px),
+                       scale: s, opacity: Float(sin(.pi * p)))
+        }
     }
 
     private func stir(_ t: TimeInterval) -> Encounter.Pose {
         let stroke = Int(t / 0.3)
         if once("stir\(phase)-\(stroke / 2)") { c.say(.swish) }
         return Encounter.Pose(sprite: ClawdSprite.stand, prop: ClawdSprite.ladle(left: stroke % 2 == 0),
-                              particles: .steam, hat: ClawdSprite.chefHat)
+                              hat: ClawdSprite.chefHat)
     }
 
     override func step(now: CFTimeInterval, dt: TimeInterval) {
@@ -250,7 +262,7 @@ final class CookingJob: Job {
                 c.face(dir)
                 stoveX = c.center + dir * 13 * px
             }
-            drawStove(now)
+            drawStove(now, steam: false) // Herd wird gerade erst angeheizt
             pose = Encounter.Pose(sprite: ClawdSprite.stand, hat: ClawdSprite.chefHat)
             if t >= 0.6 { next(now) }
         case 1, 3:
@@ -260,7 +272,7 @@ final class CookingJob: Job {
         case 2:
             // Tomate in den Topf werfen
             drawStove(now)
-            pose = Encounter.Pose(sprite: ClawdSprite.wave[1], particles: .steam, hat: ClawdSprite.chefHat)
+            pose = Encounter.Pose(sprite: ClawdSprite.wave[1], hat: ClawdSprite.chefHat)
             let p = CGFloat(min(t / 0.6, 1))
             if p < 1 {
                 let from = CGPoint(x: c.center + dir * 5 * px, y: c.groundY + 7 * px)
