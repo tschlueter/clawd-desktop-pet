@@ -53,6 +53,14 @@ class Job {
         c.finishJob(walkAway: walkAway)
     }
 
+    /// Beenden, ohne den Controller zurückzusetzen – er übernimmt selbst (z. B. Clawd fliegt mit
+    /// Schwung weiter, siehe `PetController.swing`).
+    func retire() {
+        guard !finished else { return }
+        finished = true
+        cleanup()
+    }
+
     /// Effekte ausblenden: Sie verschwinden nach kurzer Zeit (auch bei Abbruch mitten in der Arbeit).
     func cleanup() {
         retired = true
@@ -132,7 +140,8 @@ enum Jobs {
     ]
 
     /// Eingebaute Beschäftigungen, die der Controller selbst auslöst (nicht im Zufalls-Pool).
-    static let builtIn: [Job.Type] = [EatingJob.self, SweepingJob.self, TennisJob.self, FlowCodingJob.self]
+    static let builtIn: [Job.Type] = [EatingJob.self, SweepingJob.self, TennisJob.self, FlowCodingJob.self,
+                                      GrappleJob.self, JetpackJob.self]
 
     /// Gewicht pro Job: 3 = häufig (ruhiger Alltag), 2 = normal, 1 = selten (spektakulär).
     static let weights: [String: Double] = [

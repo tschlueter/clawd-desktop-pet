@@ -30,7 +30,7 @@ coding, shipping releases, flying kites, making coffee … and the occasional na
 | 🍜 **Has a life of his own** | Calm moments alternate with little activities. He gets hungry and bored, takes naps, and on weekends he works less and plays more. |
 | 👋 **Loves company** | Pick him up, throw him, shake him, poke him. Invite up to 10 Clawds — they meet, greet and team up. |
 | 📐 **Feels the tilt** | On Apple Silicon MacBooks he slides to the lower side when you tilt your MacBook. |
-| 🤫 **Knows when to be quiet** | He goes silent while a video plays and hides when an app goes fullscreen — until the coast is clear. |
+| 🤫 **Knows when to be quiet** | He goes silent while a video plays or you're on a call, and hides when an app goes fullscreen — until the coast is clear. |
 | 🎵 **Has his own voice** | Every squeak, *huch* and *wheee* is synthesized on the fly — no audio files. |
 | 🎨 **Fits right in** | Light and dark appearance, English and German, and adjustable size, speed, activity, chattiness and volume. |
 
@@ -51,7 +51,7 @@ No spoilers! Here's just how many little scenes there are in each group — disc
 
 | | Group | Scenes |
 |---|---|---:|
-| 👋 | Gestures & States | 10 |
+| 👋 | Gestures & States | 14 |
 | 🪁 | Free Time & Sports | 11 |
 | ☕ | Everyday | 9 |
 | 🔨 | Crafts | 5 |
@@ -61,7 +61,7 @@ No spoilers! Here's just how many little scenes there are in each group — disc
 | 🎧 | Focus & Stress | 4 |
 | 🤝 | Encounters *(two Clawds)* | 9 |
 | 👥 | Team Scenes *(two Clawds)* | 6 |
-| | **Total** | **78** |
+| | **Total** | **82** |
 
 ## 📦 Installation
 
@@ -96,8 +96,8 @@ Clawd lives in your menu bar. Click his icon to make him feel at home:
 | 💬 Chattiness | How much he talks on his own, from Silent to Chatterbox. |
 | 🌗 Appearance | Automatic (like macOS), Light or Dark. |
 | 🌍 Language | Automatic (like macOS), Deutsch or English. |
-| 🔊 Volume | Slider for his voice. A note appears above it while a video keeps him quiet. |
-| 🪟 Walk on Windows | Lets Clawd climb onto the tops of your windows. |
+| 🔊 Volume | Slider for his voice. A note appears above it while a video or a call keeps him quiet. |
+| 🪟 Walk on Windows | Lets Clawd climb onto the tops of your windows — even the tall ones, one way or another. |
 | 🧲 Magnetic Shoes | Lets him walk up and down the sides of your windows and the edges of your screen. |
 | 📐 React to Tilt | Tilt your MacBook and Clawd slides to the lower side. Only shown on MacBooks with a motion sensor. |
 | 🔁 Open at Login | Starts Clawd automatically when you log in. |
@@ -149,7 +149,7 @@ dependencies.
 | `ClawdSprite` | All pixel art, drawn as text grids (`"..XXEXX.."`) and rendered into cached, crisp `CGImage`s, themed for light and dark. |
 | `Voice` | Procedural speech: syllables synthesized with `AVAudioEngine`, with per-event chattiness. |
 | `TiltSensor` | Reads the MacBook's built-in motion sensor, so Clawd can slide when you tilt it. |
-| `MediaWatcher` | Detects video playback (power assertions) and fullscreen apps (window list). |
+| `MediaWatcher` | Detects video playback (power assertions), calls (microphone or camera in use) and fullscreen apps (window list). |
 | `Playground` | An optional window with its own mini Dock and boxes instead of real windows, used for testing. |
 
 Sources live in `Sources/Clawd` (activities in `Sources/Clawd/Jobs`), tests in `Tests/ClawdTests`.

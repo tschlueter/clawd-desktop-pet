@@ -13,7 +13,7 @@ final class Playground: NSObject, NSWindowDelegate {
     /// Wird nach dem Schließen aufgerufen.
     var onClose: (() -> Void)?
 
-    init(stage: Stage, world: World, size: NSSize = NSSize(width: 720, height: 460)) {
+    init(stage: Stage, world: World, size: NSSize = PlaygroundLayout.defaultSize) {
         self.stage = stage
         self.world = world
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
@@ -59,6 +59,9 @@ final class Playground: NSObject, NSWindowDelegate {
         if moved { stage.controllers.forEach { $0.shift(by: delta) } }
     }
 
+    /// Punkt relativ zur unteren linken Ecke des Spielplatzes, global.
+    func point(relative p: CGPoint) -> CGPoint { CGPoint(x: area.minX + p.x, y: area.minY + p.y) }
+
     /// Ein Punkt oben im Spielplatz, um einen Clawd hineinfallen zu lassen.
     func dropPoint(index: Int, of count: Int) -> CGPoint {
         let step = area.width / CGFloat(count + 1)
@@ -78,6 +81,11 @@ final class Playground: NSObject, NSWindowDelegate {
     }
 
     func close() { window.close() }
+
+    func bringToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
 
     /// Inhalt als Bild (für `SceneRecorder`): `rect` in Punkten relativ zur unteren linken Ecke,
     /// ohne Angabe der ganze Spielplatz.

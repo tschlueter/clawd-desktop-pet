@@ -250,17 +250,20 @@ enum ClawdSprite {
         head + ["..XEXXXXXXEX..", "..XXEXXXXEXXXX"] + torsoNoFrontArm + legsStand,
     ]
 
-    /// Sprechblase mit Comic-Flüchen (Grawlix).
+    /// Sprechblase mit Comic-Flüchen (Grawlix): ohne Rand, wird mit Schatten gezeigt (`bubbleHasShadow`).
     static let curseBubble: Frame = [
-        ".ooooooooo.",
-        "owwwwwwwwwo",
-        "owrwrwkwrwo",
-        "owwrwkkwrwo",
-        "owrwrwkwwwo",
-        "owwwwwwwrwo",
-        ".ooooooooo.",
-        ".o.........",
+        ".wwwwwwwww.",
+        "wwwwwwwwwww",
+        "wwrwrwkwrww",
+        "wwwrwkkwrww",
+        "wwrwrwkwwww",
+        "wwwwwwwwrww",
+        ".wwwwwwwww.",
+        ".w.........",
     ]
+
+    /// Sprechblasen ohne Rand heben sich nur durch einen Schatten vom Hintergrund ab.
+    static func bubbleHasShadow(_ bubble: Frame) -> Bool { bubble == curseBubble }
 
     /// Vögelchen (zwei Flügelstellungen), kreisen über dem Kopf.
     static let birdFrames: [Frame] = [
@@ -1465,14 +1468,18 @@ enum ClawdSprite {
     /// Mitte der Schlagfläche beim Durchschwingen, relativ zur Sprite-Mitte unten (in Sprite-Pixeln).
     static let racketHitOffset = CGPoint(x: (34 + 0.5 - 18) / 2, y: (22 - 13 - 0.5) / 2)
 
-    /// Tennisball mit dunkler Kontur und Glanzpunkt – auf hellem wie dunklem Hintergrund gut sichtbar.
-    /// Wird mit 0,6 × Pixelgröße gezeichnet.
+    /// Tennisball ohne Rand: Glanzlicht oben links, Schattenseite unten rechts. Wird mit
+    /// `ballScale` × Pixelgröße und weichem Schatten gezeichnet (hebt ihn von jedem Hintergrund ab).
     static let ball: Frame = [
-        ".oo.",
-        "owTo",
-        "oTTo",
-        ".oo.",
+        "..TT..",
+        ".TwTT.",
+        "TwTTTT",
+        "TTTTTl",
+        ".TTTl.",
+        "..ll..",
     ]
+    /// Zeichengröße des Balls als Faktor der Pixelgröße (6 Zellen × 0,4 = 2,4 Clawd-Pixel).
+    static let ballScale: CGFloat = 0.4
 
     // MARK: - Requisiten (symmetrisch, werden nicht gespiegelt)
 

@@ -14,6 +14,8 @@ enum DemoAction {
         case hopOff
         /// Neigung vorspielen: Clawd rutscht zur Seite wie bei einem gekippten MacBook.
         case slide
+        /// Hoch hinauf und fallen – Regenschirm bzw. Ballon bremsen, sanfte Landung, durchschnaufen.
+        case umbrella, balloon
     }
 
     case behavior(Behavior)

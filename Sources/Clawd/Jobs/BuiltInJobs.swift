@@ -71,12 +71,13 @@ final class EatingJob: Job {
         let marker = m.finished ? 999 : m.bite * 4 + (m.pose == .slurp ? 1 : m.pose == .chew ? 2 : 0)
         guard marker != lastSound else { return }
         lastSound = marker
+        // Wortkarg schmatzt nur ab und zu, Plappermaul bei jedem Bissen.
         if m.finished {
-            c.say(.happy)
+            c.sayNowAndThen(.happy)
         } else if m.pose == .slurp {
-            c.say(.slurp)
+            c.sayNowAndThen(.slurp)
         } else if m.pose == .chew {
-            c.say(.munch)
+            c.sayNowAndThen(.munch)
         }
     }
 }
@@ -210,6 +211,8 @@ final class TennisJob: Job {
     private var swingUntil: CFTimeInterval = 0
     private var swingQueued = false
     private var smashUntil: CFTimeInterval = 0
+    /// Nach dem Sprung-Schmetterball noch nicht gelandet.
+    private var smashAirborne = false
     private var lookBackUntil: CFTimeInterval = 0
 
     /// Bogen über eine Strecke: Flugzeit und Scheitelhöhe (über der geraden Linie) wachsen mit ihr.
@@ -224,7 +227,7 @@ final class TennisJob: Job {
 
     /// Kantenlänge des gezeichneten Balls.
     private var ballSize: CGFloat { CGFloat(ClawdSprite.ball.count) * ballScale }
-    private var ballScale: CGFloat { px * 0.6 }
+    private var ballScale: CGFloat { px * ClawdSprite.ballScale }
 
     private var hitPoint: CGPoint {
         CGPoint(x: c.center + c.facing * ClawdSprite.racketHitOffset.x * px,
@@ -244,6 +247,10 @@ final class TennisJob: Job {
             return
         }
         stepBall(now: now, dt: dt)
+        if smashAirborne, now >= smashUntil {
+            smashAirborne = false
+            c.playLanding()
+        }
         pose = Encounter.Pose(sprite: now < lookBackUntil ? ClawdSprite.lookCycle[3] : ClawdSprite.stand,
                               prop: ClawdSprite.racket(now < swingUntil ? .swing : .ready),
                               lift: now < smashUntil ? 2 : 0, sporty: true)
@@ -263,6 +270,7 @@ final class TennisJob: Job {
         var path = BallArc(from: from, to: to, start: now, duration: 0, arc: 0)
         if roll < 0.12 {
             smashUntil = now + 0.3 // Schmetterball mit Sprung: schnell und flacher
+            smashAirborne = true
             path.duration = max(Double(distance) / 900, 0.35)
             path.arc = min(distance * 0.08 + 10, 60)
         } else {
@@ -327,6 +335,6 @@ final class TennisJob: Job {
             return
         }
         showEffect("ball", ClawdSprite.ball, origin: CGPoint(x: position.x - ballSize / 2, y: position.y - ballSize / 2),
-                   scale: ballScale)
+                   scale: ballScale, shadow: true)
     }
 }

@@ -1,4 +1,6 @@
 import AppKit
+import CoreAudio
+import CoreMediaIO
 import IOKit.pwr_mgt
 
 /// Beobachtet, ob gerade ein Video läuft oder eine App den ganzen Bildschirm füllt.
@@ -6,10 +8,17 @@ import IOKit.pwr_mgt
 /// - Video: Player (IINA, QuickTime, VLC, Browser, Videocalls …) halten während der Wiedergabe den
 ///   Bildschirm wach ("PreventUserIdleDisplaySleep"). Reine Wach-halte-Tools wie Amphetamine oder
 ///   caffeinate tun das dauerhaft – sie werden ignoriert.
+/// - Anruf: Mikrofon oder Kamera sind gerade in Benutzung (Videocall, auch nur Audio, auch im Browser).
+///   Das lässt sich ohne Mikrofon- oder Kamera-Berechtigung abfragen; Clawd selbst nutzt beides nicht.
+///   Kein Nachsehen nötig: Audio- und Kamera-System melden Änderungen von selbst (Property-Listener).
+///
+/// Video und Vollbild werden viermal pro Sekunde geprüft; ein Space-Wechsel löst zusätzlich sofort eine
+/// Prüfung aus.
 /// - Vollbild: ein normales Fenster einer anderen App, das genau einen ganzen Bildschirm bedeckt.
 final class MediaWatcher {
     struct State: Equatable {
         var videoPlaying = false
+        var callActive = false
         /// Bildschirme (Cocoa-Rahmen), auf denen gerade eine App im Vollbild läuft.
         var fullscreenScreens: [NSRect] = []
     }
@@ -27,6 +36,13 @@ final class MediaWatcher {
 
     private var observers: [NSObjectProtocol] = []
 
+    /// Zuletzt gemeldeter Zustand von Mikrofon und Kamera (aus den Listenern).
+    private var microphoneActive = false
+    private var cameraActive = false
+    /// Listener pro Gerät, damit sie beim Abstecken wieder entfernt werden können.
+    private var audioListeners: [AudioObjectID: AudioObjectPropertyListenerBlock] = [:]
+    private var cameraListeners: [CMIOObjectID: CMIOObjectPropertyListenerBlock] = [:]
+
     init() {
         // Regelmäßig nachsehen (Video starten/stoppen, Vollbild im selben Space) …
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.poll() }
@@ -41,6 +57,7 @@ final class MediaWatcher {
                 self?.pollSoon()
             })
         }
+        startDeviceListeners()
     }
 
     deinit {
@@ -57,10 +74,24 @@ final class MediaWatcher {
 
     func poll() {
         let new = State(videoPlaying: Self.videoPlaying(excluding: ownPID),
+                        callActive: microphoneActive || cameraActive,
                         fullscreenScreens: Self.fullscreenScreens(excluding: ownPID))
+        publish(new)
+    }
+
+    private func publish(_ new: State) {
         guard new != state else { return }
         state = new
         onChange?(new)
+    }
+
+    /// Ein Listener hat sich gemeldet: Mikrofon und Kamera neu auswerten (der Rest bleibt, wie er ist).
+    private func deviceStateChanged() {
+        microphoneActive = Self.microphoneInUse()
+        cameraActive = Self.cameraInUse()
+        var new = state
+        new.callActive = microphoneActive || cameraActive
+        publish(new)
     }
 
     // MARK: - Video
@@ -95,6 +126,112 @@ final class MediaWatcher {
         var buffer = [CChar](repeating: 0, count: 256)
         proc_name(pid, &buffer, UInt32(buffer.count))
         return String(cString: buffer)
+    }
+
+    // MARK: - Anruf (Mikrofon, Kamera)
+
+    private static let audioDevicesAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    private static let audioRunningAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere, mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+    private static let cameraDevicesAddress = CMIOObjectPropertyAddress(
+        mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
+        mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+        mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
+    private static let cameraRunningAddress = CMIOObjectPropertyAddress(
+        mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere),
+        mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeWildcard),
+        mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementWildcard))
+
+    /// Listener für "Gerät läuft" an jedem Mikrofon und jeder Kamera – und für die Geräteliste selbst,
+    /// damit auch ein später angestecktes Headset oder eine externe Kamera erfasst wird.
+    private func startDeviceListeners() {
+        var devices = Self.audioDevicesAddress
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &devices, .main) { [weak self] _, _ in
+            self?.refreshDeviceListeners()
+        }
+        var cameras = Self.cameraDevicesAddress
+        CMIOObjectAddPropertyListenerBlock(CMIOObjectID(kCMIOObjectSystemObject), &cameras, .main) { [weak self] _, _ in
+            self?.refreshDeviceListeners()
+        }
+        refreshDeviceListeners()
+    }
+
+    private func refreshDeviceListeners() {
+        let mics = Set(Self.inputDevices())
+        for (id, block) in audioListeners where !mics.contains(id) {
+            var addr = Self.audioRunningAddress
+            AudioObjectRemovePropertyListenerBlock(id, &addr, .main, block)
+            audioListeners[id] = nil
+        }
+        for id in mics where audioListeners[id] == nil {
+            let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.deviceStateChanged() }
+            var addr = Self.audioRunningAddress
+            if AudioObjectAddPropertyListenerBlock(id, &addr, .main, block) == noErr { audioListeners[id] = block }
+        }
+        let cams = Set(Self.cameraDevices())
+        for (id, block) in cameraListeners where !cams.contains(id) {
+            var addr = Self.cameraRunningAddress
+            CMIOObjectRemovePropertyListenerBlock(id, &addr, .main, block)
+            cameraListeners[id] = nil
+        }
+        for id in cams where cameraListeners[id] == nil {
+            let block: CMIOObjectPropertyListenerBlock = { [weak self] _, _ in self?.deviceStateChanged() }
+            var addr = Self.cameraRunningAddress
+            if CMIOObjectAddPropertyListenerBlock(id, &addr, .main, block) == 0 { cameraListeners[id] = block }
+        }
+        DebugLog.log("Anruf-Erkennung: \(audioListeners.count) Mikrofon(e), \(cameraListeners.count) Kamera(s) beobachtet")
+        deviceStateChanged()
+    }
+
+    /// Alle Audiogeräte mit Eingang (Mikrofone).
+    private static func inputDevices() -> [AudioObjectID] {
+        var addr = audioDevicesAddress
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var devices = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &devices) == noErr else { return [] }
+        return devices.filter { device in
+            var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                                                     mScope: kAudioDevicePropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+            var streamSize: UInt32 = 0
+            return AudioObjectGetPropertyDataSize(device, &streams, 0, nil, &streamSize) == noErr && streamSize > 0
+        }
+    }
+
+    /// Alle Kameras.
+    private static func cameraDevices() -> [CMIOObjectID] {
+        var addr = cameraDevicesAddress
+        let system = CMIOObjectID(kCMIOObjectSystemObject)
+        var size: UInt32 = 0
+        guard CMIOObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == 0, size > 0 else { return [] }
+        var devices = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+        var used: UInt32 = 0
+        guard CMIOObjectGetPropertyData(system, &addr, 0, nil, size, &used, &devices) == 0 else { return [] }
+        return devices
+    }
+
+    /// Nimmt gerade irgendein Programm über ein Mikrofon auf?
+    static func microphoneInUse() -> Bool {
+        inputDevices().contains { device in
+            var addr = audioRunningAddress
+            var value: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            return AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value) == noErr && value != 0
+        }
+    }
+
+    /// Ist gerade irgendeine Kamera eingeschaltet?
+    static func cameraInUse() -> Bool {
+        cameraDevices().contains { device in
+            var addr = cameraRunningAddress
+            var value: UInt32 = 0
+            var used: UInt32 = 0
+            return CMIOObjectGetPropertyData(device, &addr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &used, &value) == 0
+                && value != 0
+        }
     }
 
     // MARK: - Vollbild

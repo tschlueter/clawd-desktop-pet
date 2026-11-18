@@ -11,7 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var uiVoice: Voice.Channel?
     private var statusItem: NSStatusItem?
     private var appearanceObservation: NSKeyValueObservation?
-    private var playground: Playground?
+    /// Offener Spielplatz: Clawd bleibt hörbar, auch bei Anruf, Video oder Vollbild – zum Vorführen.
+    private var playground: Playground? { didSet { updateMute() } }
     private let mediaWatcher = MediaWatcher()
     private let tiltSensor = TiltSensor()
 
@@ -36,12 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         voice = Voice()
         voice.volume = Float(Settings.volume)
         uiVoice = voice.makeChannel()
-        // Video läuft → stumm; App im Vollbild → stumm, Clawds dort pausiert und ausgeblendet.
+        // Anruf oder Video → stumm; App im Vollbild → stumm, Clawds dort pausiert und ausgeblendet.
         mediaWatcher.onChange = { [weak self] state in
             guard let self else { return }
-            self.voice.muted = state.videoPlaying || !state.fullscreenScreens.isEmpty
+            self.updateMute()
             self.stage.setPausedScreens(state.fullscreenScreens)
-            DebugLog.log(String(format: "%.2f ", CACurrentMediaTime()) + "Medien: Video \(state.videoPlaying), Vollbild auf \(state.fullscreenScreens.count) Bildschirm(en)")
+            DebugLog.log(String(format: "%.2f ", CACurrentMediaTime()) + "Medien: Video \(state.videoPlaying), Anruf \(state.callActive), Vollbild auf \(state.fullscreenScreens.count) Bildschirm(en)")
         }
         setupStatusItem()
 
@@ -151,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DemoEntry("demo.yawn", .behavior(.yawn)), DemoEntry("demo.sneeze", .behavior(.sneeze)),
             DemoEntry("demo.dizzy", .behavior(.dizzy)), DemoEntry("demo.hide", .behavior(.hide)),
             DemoEntry("demo.hopOff", .behavior(.hopOff)), DemoEntry("demo.slide", .behavior(.slide)),
+            DemoEntry("demo.grapple", .job(GrappleJob.self)), DemoEntry("demo.jetpack", .job(JetpackJob.self)),
+            DemoEntry("demo.umbrella", .behavior(.umbrella)), DemoEntry("demo.balloon", .behavior(.balloon)),
         ]),
         DemoGroup("demo.leisure", [
             DemoEntry("demo.music", .behavior(.music)), DemoEntry("demo.plane", .job(PaperPlaneJob.self)),
@@ -343,7 +346,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Spielplatz öffnen: Alle Clawds fallen oben hinein und bleiben dort, bis er geschlossen wird.
+    /// Stumm bei Anruf, Video oder Vollbild – außer der Spielplatz ist offen.
+    private func updateMute() {
+        let state = mediaWatcher.state
+        voice?.muted = playground == nil && (state.videoPlaying || state.callActive || !state.fullscreenScreens.isEmpty)
+    }
+
     // MARK: - Szenen aufnehmen (Startoption --record)
 
     private var recorder: SceneRecorder?
@@ -366,7 +374,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, let c = self.spawn() else { return }
             c.debugForce = options.force
-            let drop = p.dropPoint(index: 0, of: 1)
+            // `--drop x,y` gilt hier relativ zur unteren linken Ecke des Spielplatzes.
+            let drop = options.drop.map { p.point(relative: $0) } ?? p.dropPoint(index: 0, of: 1)
             if case .encounter(let kind) = options.scenario, let partner = self.spawn() {
                 // Begegnung: ein zweiter Clawd landet daneben, die Bühne startet die gewünschte Szene.
                 self.stage.forcedEncounter = kind
@@ -386,7 +395,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Spielplatz öffnen: Alle Clawds fallen oben hinein und bleiben dort, bis er geschlossen wird.
     private func openPlayground() {
+        showInDock(true)
         let p = Playground(stage: stage, world: world)
         p.onClose = { [weak self] in self?.playgroundClosed() }
         playground = p
@@ -398,11 +409,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Fenster zu: zurück auf den Desktop, alle Clawds fallen von dort, wo sie gerade sind.
     private func playgroundClosed() {
+        showInDock(false)
         playground = nil
         stage.detachPlayground()
         world.playground = nil
         controllers.forEach { $0.letFall() }
         DebugLog.log("Spielplatz geschlossen")
+    }
+
+    // MARK: - Dock und Cmd+Tab (solange der Spielplatz offen ist)
+
+    /// Mit offenem Spielplatz ist Clawd eine normale App: Symbol im Dock, Eintrag bei Cmd+Tab und eine
+    /// eigene Menüleiste (Cmd+W schließt den Spielplatz). Danach wieder reine Menüleisten-App.
+    private func showInDock(_ visible: Bool) {
+        // Jedes Mal neu aufbauen, damit ein Sprachwechsel greift.
+        NSApp.mainMenu = visible ? makeMainMenu() : nil
+        NSApp.setActivationPolicy(visible ? .regular : .accessory)
+        if visible { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    private func makeMainMenu() -> NSMenu {
+        let main = NSMenu()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: L10n.t("about"), action: #selector(showAbout), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: L10n.t("quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        let windowMenu = NSMenu(title: L10n.t("menu.window"))
+        windowMenu.addItem(withTitle: L10n.t("menu.close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        main.addItem(windowItem)
+        return main
+    }
+
+    /// Klick auf das Dock-Symbol: Spielplatz nach vorn holen.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        playground?.bringToFront()
+        return true
     }
 
     // MARK: - Menü
@@ -463,10 +509,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       selected: Settings.languages.firstIndex { $0.value == Settings.language },
                       action: #selector(setLanguage(_:)))
 
-        // Läuft ein Video (auch im Hintergrund), ist Clawd stumm – darauf über dem Regler hinweisen.
+        // Läuft ein Anruf oder ein Video (auch im Hintergrund), ist Clawd stumm – darauf über dem Regler hinweisen.
         mediaWatcher.poll()
-        if mediaWatcher.state.videoPlaying {
-            let hint = NSMenuItem(title: L10n.t("mutedForVideo"), action: nil, keyEquivalent: "")
+        if playground == nil, mediaWatcher.state.callActive || mediaWatcher.state.videoPlaying {
+            let key = mediaWatcher.state.callActive ? "mutedForCall" : "mutedForVideo"
+            let hint = NSMenuItem(title: L10n.t(key), action: nil, keyEquivalent: "")
             hint.image = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: nil)
             hint.isEnabled = false
             menu.addItem(hint)
@@ -487,6 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               action: #selector(openAccessibilitySettings), keyEquivalent: "")
         ax.target = self
         menu.addItem(.separator())
+        menu.addItem(withTitle: L10n.t("about"), action: #selector(showAbout), keyEquivalent: "").target = self
         menu.addItem(withTitle: L10n.t("quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 
@@ -600,6 +648,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Beim Loslassen eine kleine Hörprobe.
         if NSApp.currentEvent?.type == .leftMouseUp { uiVoice?.play(.happy) }
     }
+
+    @objc private func showAbout() { AboutPanel.show() }
 
     @objc private func toggleTilt() {
         Settings.reactToTilt.toggle()

@@ -269,7 +269,10 @@ final class Encounter {
                 starUntil = now + 0.45
                 a.say(.pock)
             }
-            if t >= 0.6 { next(now) }
+            if t >= 0.6 {
+                a.playLanding() // beide landen gleichzeitig: ein Plumps
+                next(now)
+            }
         default:
             both(Pose(sprite: ClawdSprite.happyStand))
             if once("yay") { b.say(.happy) }
@@ -426,6 +429,7 @@ final class Encounter {
             if t >= 0.7 { next(now) }
         default:
             let jumper = other(front)
+            if once("land\(jumps)") { jumper.playLanding() }
             set(jumper, Pose(sprite: ClawdSprite.squash))
             set(front, Pose(sprite: ClawdSprite.stand))
             if t >= 0.25 {
@@ -596,9 +600,9 @@ final class Encounter {
 
         let ballPos = flight.map { $0.path.position(now) } ?? bounce?.pos
         if let ballPos {
-            let size = CGFloat(ClawdSprite.ball.count) * px * 0.6
+            let size = CGFloat(ClawdSprite.ball.count) * px * ClawdSprite.ballScale
             effects.show("ball", ClawdSprite.ball, origin: CGPoint(x: ballPos.x - size / 2, y: ballPos.y - size / 2),
-                         scale: px * 0.6)
+                         scale: px * ClawdSprite.ballScale, shadow: true)
         } else {
             effects.hide("ball")
         }
@@ -702,6 +706,7 @@ final class Encounter {
             both(Pose(sprite: p < 1 ? ClawdSprite.flail : ClawdSprite.sit, lift: 2 * sin(.pi * p)))
             if once("rip") { a.say(oneOf: Voice.Sound.whine) }
             if t >= 0.1, once("rip2") { b.say(oneOf: Voice.Sound.whine) }
+            if p >= 1, once("bump") { a.playLanding() } // auf den Hintern geplumpst
             if t >= 0.6 { next(now) }
         case 3:
             // Erschrocken anschauen

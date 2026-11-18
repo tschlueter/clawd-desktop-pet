@@ -5,7 +5,7 @@ import AppKit
 /// Clawd steht immer auf einer `Platform` (Dock, Fenster-Oberkante oder Bildschirm-Unterkante)
 /// oder ist in der Luft. Das Dock ist ein fester Block; Fenster sind nur von oben begehbar.
 final class PetController {
-    enum Emote { case sneeze, yawn, dizzy }
+    enum Emote { case sneeze, yawn, dizzy, relief }
 
     enum SportKind: String, CaseIterable {
         case barbell, rope
@@ -276,7 +276,7 @@ final class PetController {
     /// Von der aktuellen Stelle aus fallen lassen (z. B. wenn der Spielplatz geschlossen wird).
     func letFall() {
         if isDragging { NSCursor.pop(); isDragging = false }
-        startFalling(vx: 0)
+        startFalling(vx: 0, unwanted: true)
     }
 
     /// Clawd an einem Punkt fallen lassen (z. B. ein Demo-Partner).
@@ -361,6 +361,8 @@ final class PetController {
             stepSliding(dt: dt, now: now)
         case .airborne:
             stepPhysics(dt: dt)
+        case .job where surface == nil:
+            stepJob(now: now, dt: dt) // frei in der Luft (Enterhaken, Jetpack)
         case .sheltering:
             stepShelter(now: now)
         case .landing(let remaining):
@@ -378,6 +380,10 @@ final class PetController {
                     droppedByUser = false
                     takeCover()
                     shelterReleased = now
+                } else if let kind = pendingRelief {
+                    pendingRelief = nil
+                    reliefProp = kind
+                    startEmote(.relief)
                 } else {
                     if knockedOut {
                         knockedOut = false
@@ -406,6 +412,8 @@ final class PetController {
             self.job = nil
         }
 
+        cleanUpChute()
+
         if state.kind != stateKind {
             stateKind = state.kind
             if isActivityState { activityPending = true }
@@ -430,6 +438,7 @@ final class PetController {
         if isOnWall { return true }
         switch state {
         case .airborne, .dragged: return true
+        case .job: return surface == nil
         default: return false
         }
     }
@@ -452,11 +461,11 @@ final class PetController {
             // Fenster unter ihm weggezogen (nicht selbst runtergelaufen)? Dann ist es ein Absturz.
             if case .window(let id) = kind, !walkingOff, world.windowFrames[id] != nil {
                 yankedFall = true
-                startFalling(vx: 0)
+                startFalling(vx: 0, unwanted: true)
                 say(oneOf: Voice.Sound.startled)
                 return
             }
-            startFalling(vx: 0)
+            startFalling(vx: 0, unwanted: true)
             return
         }
         pos.y = platform.y
@@ -501,12 +510,13 @@ final class PetController {
         case .sleeping(let r):
             if now >= nextSnore {
                 // Abwechselnd normales Schnarchen und Cartoon-"we we we".
+                let pause = Self.snorePause(talkativeness: talkativeness)
                 if Bool.random() {
                     say(.snore)
-                    nextSnore = now + .random(in: 3...4.5)
+                    nextSnore = now + .random(in: 3...4.5) + .random(in: pause)
                 } else {
                     say(.sleepyWe)
-                    nextSnore = now + .random(in: 4...5.5)
+                    nextSnore = now + .random(in: 4...5.5) + .random(in: pause)
                 }
             }
             countdown(r, dt) { .sleeping(remaining: $0) }
@@ -530,11 +540,7 @@ final class PetController {
         case .emote(let e):
             stepEmote(e, now: now)
         case .job:
-            if let job, now - job.startedAt > Job.maxDuration {
-                job.finish() // Sicherheitsnetz: hängt eine Arbeit, wird sie beendet
-            } else {
-                job?.step(now: now, dt: dt)
-            }
+            stepJob(now: now, dt: dt)
         default:
             break
         }
@@ -628,7 +634,7 @@ final class PetController {
         }
 
         if walkingOff {
-            if !platform.contains(x: centerX) { startFalling(vx: direction * speed) }
+            if !platform.contains(x: centerX) { startFalling(vx: direction * speed, unwanted: true) }
             return
         }
 
@@ -717,25 +723,54 @@ final class PetController {
     }
 
     /// Ruhige Phase: nur unauffälliges Grundverhalten – laufen, stehen, umschauen, sitzen, schlafen.
+    /// Gewichte und Dauern der ruhigen Phase je nach Aktivität. Bei wenig Aktivität (gemütlich, Faulpelz)
+    /// läuft und steht Clawd mehr, sitzt ab und zu und schläft seltener und kürzer als früher; ab
+    /// "normal" bleibt alles wie gehabt.
+    struct CalmWeights: Equatable {
+        var walk: Double
+        var idle: Double
+        var sit: Double
+        var sleep: Double
+        /// Teiler für die Dauer von Stehen bzw. Sitzen und Schlafen (größer = kürzer).
+        var idlePace: Double
+        var restPace: Double
+    }
+
+    static func calmWeights(activity a: Double) -> CalmWeights {
+        let slow = min(a, 1)
+        return CalmWeights(walk: 0.45 * max(a, 1),
+                           idle: 0.15 / a,
+                           sit: 0.1 / (a < 1 ? slow.squareRoot() : a),
+                           sleep: 0.05 / max(a, 1),
+                           idlePace: a,
+                           restPace: a < 1 ? max(a.squareRoot(), 0.65) : a)
+    }
+
     private func chooseCalm(_ a: Double) {
+        let w = Self.calmWeights(activity: a)
         let jump = jumpCandidate()
+        // Zu hoch zum Springen: mit Enterhaken oder Jetpack hinauf.
+        let canGrapple = GrappleJob.isPossible(self), canJet = JetpackJob.isPossible(self)
         pickWeighted([
-            (0.45 * a, { [unowned self] in
+            (w.walk, { [unowned self] in
                 if Double.random(in: 0...1) < 0.35 { self.direction *= -1 }
                 self.state = .walking(remaining: .random(in: 6...20))
             }),
             (jump == nil ? 0 : 0.08 * a, { [unowned self] in
                 if let (platform, x) = jump { self.jump(to: platform, centerX: x) }
             }),
+            (canGrapple || canJet ? 0.015 * a : 0, { [unowned self] in
+                if canGrapple, !canJet || Bool.random() { self.startJob(GrappleJob(self)) } else { self.startJob(JetpackJob(self)) }
+            }),
             // Gelegentlich vom Dock hinunter, um sich unten umzusehen.
             (hopOffSides.isEmpty ? 0 : 0.04 * a, { [unowned self] in _ = self.startHopOff() }),
-            (0.15 / a, { [unowned self] in
-                self.state = .idle(remaining: .random(in: 2...6) / a)
+            (w.idle, { [unowned self] in
+                self.state = .idle(remaining: .random(in: 2...6) / w.idlePace)
                 if self.chatty(0.3) { self.voice.play(.murmur) }
             }),
             (0.1, { [unowned self] in self.state = .looking(remaining: 2.4) }),
-            (0.1 / a, { [unowned self] in self.state = .sitting(remaining: .random(in: 6...15) / a) }),
-            (0.05 / a, { [unowned self] in
+            (w.sit, { [unowned self] in self.state = .sitting(remaining: .random(in: 6...15) / w.restPace) }),
+            (w.sleep, { [unowned self] in
                 if Double.random(in: 0..<1) < 0.7 {
                     self.startEmote(.yawn, thenSleep: true) // erst gähnen, dann einschlafen
                 } else {
@@ -809,9 +844,20 @@ final class PetController {
     }
 
     private func startSleeping() {
-        beginEvent()
-        state = .sleeping(remaining: .random(in: 15...40) / activity)
-        nextSnore = CACurrentMediaTime() + 1.5
+        // Schlaf ist nicht ganz oder gar nicht hörbar: Wie oft geschnarcht wird, regelt `snorePause`.
+        beginEvent(audible: isChatty)
+        state = .sleeping(remaining: .random(in: 15...40) / Self.calmWeights(activity: activity).restPace)
+        nextSnore = CACurrentMediaTime() + 1.5 + .random(in: Self.snorePause(talkativeness: talkativeness)) / 2
+    }
+
+    /// Zusätzliche Stille zwischen zwei Schnarchern: Wortkarg schnarcht nur ab und zu,
+    /// Normal mit kleinen Pausen, Plappermaul durchgehend.
+    static func snorePause(talkativeness: Double) -> ClosedRange<Double> {
+        switch talkativeness {
+        case 2...: 0...0
+        case 1...: 2...5
+        default: 12...24
+        }
     }
 
     private func startSport(_ kind: SportKind) {
@@ -848,7 +894,7 @@ final class PetController {
         case .sit: state = .sitting(remaining: 6)
         case .coding: state = .coding(remaining: 30); startActivity(active: true)
         case .music: state = .music(remaining: 30); startActivity(active: false)
-        case .sleep: beginEvent(); state = .sleeping(remaining: 30); nextSnore = CACurrentMediaTime() + 1
+        case .sleep: beginEvent(audible: isChatty); state = .sleeping(remaining: 30); nextSnore = CACurrentMediaTime() + 1
         case .sneeze: startEmote(.sneeze)
         case .yawn: startEmote(.yawn, thenSleep: true)
         case .dizzy: startEmote(.dizzy)
@@ -862,6 +908,8 @@ final class PetController {
             if !startWallJumps() { trace("Wandsprung: kein Fenster in Sprungweite") }
         case .hopOff:
             if !startHopOff() { trace("Vom Dock hüpfen: nicht auf dem Dock oder kein Platz daneben") }
+        case .umbrella: demoChute(.umbrella)
+        case .balloon: demoChute(.balloon)
         case .slide:
             // Neigung vorspielen: 2,5 s lang, als würde das MacBook zur Seite gekippt.
             let strength = magneticShoes ? 0.55 : 0.4 // mit Magnetschuhen braucht es mehr
@@ -910,11 +958,161 @@ final class PetController {
         say(.happy)
     }
 
+    // MARK: - Sanft landen (Regenschirm, Ballon)
+
+    enum ChuteKind { case umbrella, balloon }
+
+    /// Ab dieser Fallhöhe (pt) lohnt sich Schirm oder Ballon.
+    static let chuteMinDrop: CGFloat = 150
+    /// Wie oft bei einem ungewollten Sturz (ab `chuteMinDrop`) eine Bremse aufgeht.
+    static let chuteChance = 0.2
+    /// Sinkgeschwindigkeit (pt/s) mit offenem Schirm bzw. Ballon.
+    static let chuteSpeed: CGFloat = 140
+
+    /// Wann nach Beginn eines ungewollten Sturzes entschieden wird, ob eine Bremse aufgeht.
+    private var chuteCheckAt: CFTimeInterval?
+    /// Offener Schirm bzw. Ballon im Fall (`deploySpeed` = Fallgeschwindigkeit beim Öffnen).
+    private var chute: (kind: ChuteKind, since: CFTimeInterval, deploySpeed: CGFloat)?
+    /// Gelandet, gleich wird durchgeschnauft.
+    private var pendingRelief: ChuteKind?
+    /// Was er beim Durchschnaufen gerade wegpackt bzw. loslässt.
+    private var reliefProp: ChuteKind?
+    /// Wo der losgelassene Ballon startet.
+    private var balloonRelease = CGPoint.zero
+    /// Demo: beim nächsten ungewollten Sturz sicher diese Bremse.
+    private var forcedChute: ChuteKind?
+
+    /// Kurz nach Beginn eines ungewollten Sturzes: Schirm oder Ballon öffnen (manchmal, und nur, wenn es
+    /// tief genug hinuntergeht).
+    private func updateChute() {
+        guard chute == nil, let at = chuteCheckAt, CACurrentMediaTime() >= at else { return }
+        guard velocity.dy < 0 else { chuteCheckAt = CACurrentMediaTime() + 0.1; return } // erst, wenn es abwärts geht
+        chuteCheckAt = nil
+        let forced = forcedChute
+        forcedChute = nil
+        guard let drop = dropBelow(), drop >= Self.chuteMinDrop,
+              forced != nil || Double.random(in: 0..<1) < Self.chuteChance else { return }
+        let kind = forced ?? (Bool.random() ? .umbrella : .balloon)
+        chute = (kind, CACurrentMediaTime(), -velocity.dy)
+        knockedOut = false // gerettet: kein Sturz, kein Schimpfen
+        yankedFall = false
+        fallSoundPlayed = true
+        playNoise(kind == .umbrella ? .umbrellaOpen : .balloonInflate)
+        trace("öffnet \(kind == .umbrella ? "den Regenschirm" : "einen Ballon"), \(Int(drop)) pt über dem Boden")
+    }
+
+    /// Wie tief es unter Clawd (bzw. von `y` an der Stelle `x`, linke Kante) bis zur nächsten Fläche
+    /// hinuntergeht.
+    private func dropBelow(x: CGFloat? = nil, y: CGFloat? = nil) -> CGFloat? {
+        let left = x ?? pos.x, top = y ?? pos.y
+        let center = left + spriteSize.width / 2
+        let below = world.allPlatforms.filter { p in
+            p.y <= top && (p.kind == .dock ? overlapsDock(left) : p.contains(x: center))
+        }
+        return below.map(\.y).max().map { top - $0 }
+    }
+
+    /// Schirm bzw. Ballon über der erhobenen Hand zeigen; `open` = Sekunden seit dem Öffnen,
+    /// `closing` = Schirm halb zugeklappt.
+    private func showChute(_ kind: ChuteKind, open: TimeInterval, closing: Bool = false) {
+        let s = pixel / 2
+        let handX = centerX + direction * 6 * pixel
+        let handTop = pos.y + 10 * pixel // Arm ragt 2 px über den Kopf
+        fx.show("chuteArm", ClawdSprite.raisedArm(rows: 4),
+                origin: CGPoint(x: centerX + (direction > 0 ? 5 : -7) * pixel, y: pos.y + 8 * pixel), scale: s)
+        switch kind {
+        case .umbrella:
+            let frame = open < 0.18 || closing ? ClawdSprite.umbrellaHalf : ClawdSprite.umbrellaOpen
+            fx.show("chute", frame, origin: CGPoint(x: handX - 16 * s, y: handTop - 2 * s), scale: s, mirrored: direction < 0, shadow: true)
+        case .balloon:
+            let size = open < 0.12 ? 0 : (open < 0.25 ? 1 : 2)
+            fx.show("chute", ClawdSprite.balloon(size: size), origin: CGPoint(x: handX - 7 * s, y: handTop - s), scale: s, shadow: true)
+        }
+    }
+
+    private func hideChute() {
+        for key in ["chute", "chuteArm", "sigh"] { fx.hide(key) }
+    }
+
+    /// Bilder beim Durchschnaufen: Schirm zuklappen bzw. Ballon davonschweben lassen, Atemwölkchen.
+    private func updateReliefSprite(t: TimeInterval) {
+        node.sprite = t < 0.4 ? ClawdSprite.hangFrames[1] : ClawdSprite.relieved
+        let s = pixel / 2
+        switch reliefProp {
+        case .umbrella:
+            if t < 0.4 { showChute(.umbrella, open: 1, closing: t >= 0.2) } else { fx.hide("chute"); fx.hide("chuteArm") }
+        case .balloon:
+            if t < 0.4 {
+                showChute(.balloon, open: 1)
+            } else {
+                if cue("release") {
+                    fx.hide("chuteArm")
+                    balloonRelease = CGPoint(x: centerX + direction * 6 * pixel - 7 * s, y: pos.y + 9 * pixel)
+                }
+                let rise = CGFloat(t - 0.4) * 90
+                let fade = Float(max(0, min(1, 1 - (t - 1.2) / 0.7)))
+                fx.show("chute", ClawdSprite.balloon(size: 2), origin: CGPoint(x: balloonRelease.x, y: balloonRelease.y + rise),
+                        scale: s, opacity: fade, shadow: true)
+            }
+        case nil:
+            break
+        }
+        if t >= 0.45, t < 1.4 {
+            let fade = Float(min(1, (1.4 - t) / 0.4))
+            fx.show("sigh", ClawdSprite.sighPuff, origin: CGPoint(x: centerX + direction * 8 * pixel - 2.5 * s, y: pos.y + 4.5 * pixel),
+                    scale: s, opacity: fade, mirrored: direction < 0)
+        } else {
+            fx.hide("sigh")
+        }
+    }
+
+    private func finishRelief() {
+        reliefProp = nil
+        hideChute()
+    }
+
+    /// Requisiten aufräumen, wenn der Ablauf unterbrochen wird (hochgehoben, an eine Kante geheftet …).
+    private func cleanUpChute() {
+        var relieving = false
+        if case .emote(.relief) = state { relieving = true }
+        if chute != nil, state.kind != .airborne {
+            chute = nil
+            hideChute()
+        }
+        if pendingRelief != nil, state.kind != .landing, !relieving {
+            pendingRelief = nil
+            hideChute()
+        }
+        if reliefProp != nil, !relieving { finishRelief() }
+    }
+
+    /// Demo: hoch über die aktuelle Stelle und von dort fallen – mit sicherer Bremse.
+    private func demoChute(_ kind: ChuteKind) {
+        if isOnWall { wallToUpright() }
+        guard let screen = world.screen(containingX: centerX, y: pos.y + 1) ?? world.nearestScreen(toX: centerX) else { return }
+        let top = max(pos.y, screen.visibleFrame.maxY - spriteSize.height - 40)
+        // In der Nähe die Stelle mit der meisten Luft darunter (nicht über einem hohen Fenster).
+        let candidates = stride(from: -300, through: 300, by: 50).map { pos.x + CGFloat($0) }
+            .filter { $0 >= screen.frame.minX && $0 + spriteSize.width <= screen.frame.maxX }
+        let here = pos.x
+        pos.x = candidates.max { a, b in
+            let da = dropBelow(x: a, y: top) ?? 0, db = dropBelow(x: b, y: top) ?? 0
+            return da != db ? da < db : abs(a - here) > abs(b - here) // gleich tief: die nähere Stelle
+        } ?? here
+        pos.y = top
+        forcedChute = kind
+        startFalling(vx: 0, unwanted: true)
+    }
+
     // MARK: - Luft
 
     /// Ein Fall ist ein Ereignis: Erschrecken, "Wiiieee", "Oof" und "Klonk" gehören zusammen.
-    private func startFalling(vx: CGFloat) {
+    /// `unwanted`: nicht selbst gesprungen (heruntergefallen, weggezogen, abgeschüttelt, fallen gelassen) –
+    /// dann geht manchmal Regenschirm oder Ballon auf (siehe `updateChute`).
+    private func startFalling(vx: CGFloat, unwanted: Bool = false) {
         beginEvent()
+        chute = nil
+        chuteCheckAt = unwanted ? CACurrentMediaTime() + 0.25 : nil
         if isOnWall {
             undockEffect(sound: false)
             wallToUpright()
@@ -942,6 +1140,16 @@ final class PetController {
     private func stepPhysics(dt: TimeInterval) {
         let t = CGFloat(dt)
         velocity.dy -= gravity * t
+        updateChute()
+        if let c = chute {
+            // Schirm bzw. Ballon bremsen den Fall innerhalb von 0,3 s auf gemächliches Schweben; dabei
+            // pendelt er leicht hin und her.
+            let open = CGFloat(min((CACurrentMediaTime() - c.since) / 0.3, 1))
+            let maxFall = c.deploySpeed + (Self.chuteSpeed - c.deploySpeed) * open
+            velocity.dy = max(velocity.dy, -maxFall)
+            let sway = 22 * CGFloat(sin((CACurrentMediaTime() - c.since) * 2.4))
+            velocity.dx += (sway - velocity.dx) * min(1, t * 2)
+        }
         // Geneigtes MacBook: die Schwerkraft zieht auch ein Stück zur Seite.
         if abs(effectiveTilt) > 0.05 { velocity.dx += CGFloat(effectiveTilt) * gravity * t }
         let prev = pos
@@ -1014,6 +1222,15 @@ final class PetController {
     }
 
     private func land(on p: Platform, x: CGFloat) {
+        let impact = -velocity.dy
+        // Mit Schirm oder Ballon: sanft gelandet, kein Sturz – danach wird durchgeschnauft.
+        let landedChute = chute?.kind
+        if landedChute != nil {
+            chute = nil
+            yankedFall = false
+            knockedOut = false
+            pendingRelief = landedChute
+        }
         wallJumpsLeft = 0 // Serie verpasst: auf einer Fläche gelandet
         climbingSince = nil
         if yankedFall {
@@ -1032,14 +1249,16 @@ final class PetController {
         }
         pos.y = p.y
         distanceWalked = 0
-        // Aufprall: nach einem Sturz "Autsch", aus großer Höhe ein Stöhnen, sonst "Oof".
+        // Aufprall: nach einem Sturz "Autsch", ab einer gewissen Höhe "Oof" – sonst (oder wenn das
+        // Ereignis stumm ist) ein "Plumps" bei jeder richtigen Landung. Nie beides.
         let height = fallStartY - p.y
-        if knockedOut, height > 30 {
-            say(.autsch)
-        } else if height > 400 {
-            say(.ohOuh)
-        } else if height > 120 {
-            say(.oof)
+        let reaction: Voice.Sound? = knockedOut && height > 30 ? .autsch : (height > 120 ? .oof : nil)
+        if landedChute != nil {
+            // sanfte Landung: kein Aufprall-Laut
+        } else if let reaction, eventAudible {
+            say(reaction)
+        } else if impact >= Self.thudSpeed {
+            playLanding()
         }
         if grumpyWake {
             grumpyWake = false
@@ -1150,7 +1369,7 @@ final class PetController {
         if world.dock.isDock, pos.y < world.dock.y, overlapsDock(pos.x) {
             pos.y = world.dock.y
         }
-        startFalling(vx: v.dx)
+        startFalling(vx: v.dx, unwanted: true)
         droppedByUser = true
         velocity.dy = v.dy
     }
@@ -1259,7 +1478,12 @@ final class PetController {
             node.bootsGlow = magnet != nil && Int(now / 0.12) % 2 == 0
             drawMagnetWaves(now: now)
         case .airborne:
-            node.sprite = velocity.dy < -250 ? ClawdSprite.flail : ClawdSprite.stand
+            if let c = chute {
+                node.sprite = ClawdSprite.hangFrames[Int(now / 0.3) % 2]
+                showChute(c.kind, open: now - c.since)
+            } else {
+                node.sprite = velocity.dy < -250 ? ClawdSprite.flail : ClawdSprite.stand
+            }
         case .landing:
             node.sprite = ClawdSprite.squash
         case .sliding:
@@ -1378,6 +1602,13 @@ final class PetController {
                 if t >= 5.6, cue("scold2") { say(oneOf: [.scold, .naWarte]) }
             }
             if t >= 7.0 { state = .idle(remaining: .random(in: 0.8...1.5)) }
+        case .relief:
+            // Sanft gelandet: Schirm zuklappen bzw. Ballon loslassen, erleichtert durchschnaufen.
+            if t >= 0.45, cue("relief") { say(.relief) }
+            if t >= 1.9 {
+                finishRelief()
+                state = .idle(remaining: .random(in: 0.6...1.2))
+            }
         case .yawn:
             if t >= 0.3, cue("yawn") { say(.yawn) }
             if t >= 2.4 {
@@ -1389,6 +1620,8 @@ final class PetController {
     private func updateEmoteSprite(_ e: Emote, now: CFTimeInterval, blinking: Bool) {
         let t = now - emoteStart
         switch e {
+        case .relief:
+            updateReliefSprite(t: t)
         case .sneeze:
             switch t {
             case ..<1.2:
@@ -1493,7 +1726,7 @@ final class PetController {
     /// am Bildschirmrand und am Dock-Block bleibt er hängen.
     private func stepSliding(dt: TimeInterval, now: CFTimeInterval) {
         guard let kind = surface, let platform = world.platform(kind, near: centerX) else {
-            startFalling(vx: slideSpeed)
+            startFalling(vx: slideSpeed, unwanted: true)
             return
         }
         let t = CGFloat(dt)
@@ -1511,7 +1744,7 @@ final class PetController {
             switch kind {
             case .window, .dock:
                 trace("rutscht über die Kante")
-                startFalling(vx: slideSpeed)
+                startFalling(vx: slideSpeed, unwanted: true)
                 return
             default:
                 break
@@ -1534,7 +1767,7 @@ final class PetController {
     var magneticShoes = false {
         didSet {
             node.boots = magneticShoes
-            if !magneticShoes, isOnWall { startFalling(vx: 0) }
+            if !magneticShoes, isOnWall { startFalling(vx: 0, unwanted: true) }
         }
     }
 
@@ -1846,7 +2079,7 @@ final class PetController {
             // Abgeschüttelt! Weg vom Fenster, hinfallen.
             knockedOut = true
             shake.reset()
-            startFalling(vx: CGFloat(g.side) * 160)
+            startFalling(vx: CGFloat(g.side) * 160, unwanted: true)
             velocity.dy = 220
             say(oneOf: [.eep, .weehEeh])
             return
@@ -1859,12 +2092,12 @@ final class PetController {
                                screens: world.screens.map(\.frame)) else {
             trace("kein Platz mehr neben der Fensterkante")
             magnetPauseUntil = now + 1.2 // erst mal richtig herunterfallen, nicht gleich wieder andocken
-            startFalling(vx: CGFloat(-g.side) * 60)
+            startFalling(vx: CGFloat(-g.side) * 60, unwanted: true)
             return
         }
         // Ein anderes Fenster hat sich davorgeschoben? Dann hält nichts mehr – herunterfallen.
         guard world.isEdgeVisible(g.id, at: CGPoint(x: g.x, y: pos.y)) else {
-            startFalling(vx: CGFloat(g.side) * 60)
+            startFalling(vx: CGFloat(g.side) * 60, unwanted: true)
             return
         }
         checkCursor(now: now)
@@ -1892,6 +2125,9 @@ final class PetController {
         case .idle(let r): countdown(r, dt) { .idle(remaining: $0) }
         case .looking(let r): countdown(r, dt) { .looking(remaining: $0) }
         case .waving(let r): countdown(r, dt) { .waving(remaining: $0) }
+        case .job:
+            stepJob(now: now, dt: dt) // Enterhaken mit Magnetschuhen: die Arbeit steuert das Klettern
+            return
         default: state = .idle(remaining: 1)
         }
         // Blickrichtung im (gedrehten) Sprite: an der linken Kante heißt "nach rechts" = hoch.
@@ -2020,11 +2256,49 @@ final class PetController {
         if let sound = sounds.randomElement() { say(sound) }
     }
 
+    /// Für lange Abläufe mit vielen gleichartigen Lauten (Essen): Statt das ganze Ereignis
+    /// hörbar oder stumm zu würfeln, entscheidet jeder Laut für sich – Wortkarg nur ab und zu,
+    /// Plappermaul jedes Mal.
+    func sayNowAndThen(_ sound: Voice.Sound) {
+        let audible = isChatty && Double.random(in: 0..<1) < Self.nowAndThenChance(talkativeness: talkativeness)
+        trace("laut: \(sound)" + (audible ? "" : " (stumm)"))
+        if audible { voice.play(sound) }
+    }
+
+    static func nowAndThenChance(talkativeness: Double) -> Double {
+        switch talkativeness {
+        case 2...: 1
+        case 1...: 0.6
+        case ..<0.01: 0
+        default: 0.25
+        }
+    }
+
     func say(_ sound: Voice.Sound) {
         trace("laut: \(sound)" + (eventAudible ? "" : " (stumm)"))
         guard eventAudible else { return }
         voice.play(sound)
     }
+
+    /// Geräusch statt Stimme (Enterhaken, Triebwerk, Landung): spielt unabhängig von der
+    /// Gesprächigkeit – stumm nur, wenn der Ton insgesamt aus ist (Lautstärke, Anruf, Video).
+    func playNoise(_ sound: Voice.Sound) {
+        trace("geräusch: \(sound)")
+        voice.playNoise(sound)
+    }
+
+    /// Zuletzt gespieltes "Plumps" – das nächste klingt anders.
+    private var lastLanding: Voice.Sound?
+
+    /// "Plumps" bei einer Landung: im Wechsel eine der drei Varianten, nie zweimal dieselbe hintereinander.
+    func playLanding() {
+        let sound = Voice.Sound.landing.filter { $0 != lastLanding }.randomElement() ?? .landSoft
+        lastLanding = sound
+        playNoise(sound)
+    }
+
+    /// Ab dieser Aufprallgeschwindigkeit (pt/s) macht eine Landung "Plumps" – kleine Hüpfer bleiben leise.
+    static let thudSpeed: CGFloat = 200
 
     // MARK: - In Deckung (Vollbild)
 
@@ -2088,6 +2362,78 @@ final class PetController {
         state = .job
     }
 
+    private func stepJob(now: CFTimeInterval, dt: TimeInterval) {
+        if let job, now - job.startedAt > Job.maxDuration {
+            job.finish() // Sicherheitsnetz: hängt eine Arbeit, wird sie beendet
+        } else {
+            job?.step(now: now, dt: dt)
+        }
+    }
+
+    // MARK: Hoch hinaus (Schnittstelle für Enterhaken und Jetpack)
+
+    /// Vom Boden lösen: Die Arbeit bewegt Clawd jetzt frei (keine Schwerkraft, bis sie ihn loslässt).
+    func takeOff() {
+        if isOnWall { wallToUpright() }
+        surface = nil
+        walkingOff = false
+        floorVisitUntil = nil
+        fallStartY = pos.y
+    }
+
+    /// In der Luft: Füße mittig bei (x, y).
+    func hover(centerX x: CGFloat, footY y: CGFloat) {
+        pos = CGPoint(x: x - spriteSize.width / 2, y: y)
+    }
+
+    /// Aus der Luft auf einer Fläche aufsetzen; false, wenn sie hier nicht (mehr) ist.
+    func touchDown(on kind: Platform.Kind) -> Bool {
+        guard let p = world.platform(kind, near: centerX), p.contains(x: centerX), abs(p.y - pos.y) < 8 else { return false }
+        surface = kind
+        pos.y = p.y
+        climbingSince = nil
+        return true
+    }
+
+    /// Mit Magnetschuhen an eine Fenster- oder Bildschirmkante treten (Füße dort, wo er gerade steht).
+    /// Die Arbeit läuft weiter und schiebt ihn mit `climbWall(to:)` hoch.
+    func gripWall(id: CGWindowID, side: Int) -> Bool {
+        guard magneticShoes, let f = world.wallFrames[id] else { return false }
+        if climbingSince == nil { climbingSince = CACurrentMediaTime() }
+        surface = .wall(id, side)
+        pos = CGPoint(x: side < 0 ? f.minX : f.maxX, y: pos.y + spriteSize.width / 2)
+        wallDir = 1
+        say(.wallPock)
+        dockEffect()
+        return wall != nil
+    }
+
+    /// Bereich, in dem der Fußpunkt an der aktuellen Kante liegen kann.
+    var wallFootRange: ClosedRange<CGFloat>? { wall.map { $0.minY...$0.maxY } }
+
+    /// Fußpunkt an der Kante (an der Kante entlang).
+    func climbWall(to y: CGFloat) {
+        guard let g = wall else { return }
+        pos.y = min(max(y, g.minY), g.maxY)
+    }
+
+    /// Mit Schwung (vom Seil oder von der Kante) auf eine Fläche springen; die Arbeit endet,
+    /// die Physik übernimmt die Landung.
+    func swing(onto kind: Platform.Kind, centerX tx: CGFloat) {
+        guard let target = world.platform(kind, near: tx) else { return }
+        job = nil
+        if isOnWall { wallToUpright() }
+        surface = nil
+        magnetPauseUntil = CACurrentMediaTime() + 0.6 // nicht gleich wieder an die Kante haften
+        let overshoot: CGFloat = 26
+        let h = max(target.y - pos.y, 0) + overshoot
+        let vy = sqrt(2 * gravity * h)
+        let flightTime = vy / gravity + sqrt(2 * overshoot / gravity)
+        startFalling(vx: (tx - centerX) / flightTime)
+        velocity.dy = vy
+        say(oneOf: Voice.Sound.cheer)
+    }
+
     func finishJob(walkAway: Bool) {
         job = nil
         guard case .job = state else { return }
@@ -2109,7 +2455,8 @@ final class PetController {
     }
 
     private func place() {
-        if case .airborne = state, velocity.dx != 0 {
+        // Im Flug in Flugrichtung schauen – außer beim Pendeln am Schirm bzw. Ballon.
+        if case .airborne = state, velocity.dx != 0, chute == nil {
             direction = velocity.dx < 0 ? -1 : 1
         }
         node.facingLeft = direction < 0

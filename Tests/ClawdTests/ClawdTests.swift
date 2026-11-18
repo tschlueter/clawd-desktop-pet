@@ -504,19 +504,27 @@ struct SeededRandom: RandomNumberGenerator {
         #expect(abs(left.heading(0.5)) > 3.1)           // nach links: Spitze zeigt nach links
     }
 
-    @Test func ballIsSquareAndOutlined() {
+    @Test func ballIsSquareBorderlessAndKeepsItsSize() {
         #expect(ClawdSprite.ball.allSatisfy { $0.count == ClawdSprite.ball.count })
-        #expect(ClawdSprite.ball.joined().contains("o"))
+        #expect(!ClawdSprite.ball.joined().contains("o")) // kein grauer Rand mehr, dafür Schatten
+        #expect(abs(CGFloat(ClawdSprite.ball.count) * ClawdSprite.ballScale - 2.4) < 0.001) // so groß wie früher
+        for ch in ClawdSprite.ball.joined() where ch != "." {
+            #expect(ClawdSprite.rgb(ch, theme: .light) != nil && ClawdSprite.rgb(ch, theme: .dark) != nil)
+        }
     }
 }
 
 // MARK: - Spielplatz
 
 @Suite struct PlaygroundLayoutTests {
-    static let sizes: [NSSize] = [PlaygroundLayout.minimumSize, NSSize(width: 720, height: 460), NSSize(width: 1600, height: 1000)]
+    static let sizes: [NSSize] = [PlaygroundLayout.minimumSize, PlaygroundLayout.defaultSize, NSSize(width: 1600, height: 1000)]
+    /// Kleine Flächen für die README-Aufnahmen: kompaktes Layout.
+    static let compactSizes: [NSSize] = [NSSize(width: 480, height: 300), NSSize(width: 600, height: 260)]
+    let px: CGFloat = 4
+    var half: CGFloat { 7 * px }
 
     @Test func everythingFitsInside() {
-        for size in Self.sizes {
+        for size in Self.sizes + Self.compactSizes {
             let area = NSRect(origin: CGPoint(x: 300, y: 200), size: size)
             let p = PlaygroundLayout(area: area)
             #expect(area.contains(p.dock))
@@ -530,12 +538,15 @@ struct SeededRandom: RandomNumberGenerator {
                 #expect(box.rect.maxY + 40 <= area.maxY, "Platz für Clawd auf dem Kasten")
                 #expect(box.rect.width >= 120, "breit genug für Fenster-Jobs")
             }
+            for (i, a) in p.boxes.enumerated() {
+                for b in p.boxes[(i + 1)...] { #expect(!a.rect.intersects(b.rect)) }
+                #expect(!a.rect.intersects(p.dock))
+            }
         }
     }
 
-    @Test func boxesAreReachableByJumping() {
-        // Clawd springt 30–170 pt hoch: der erste Kasten vom Boden/Dock, der zweite vom ersten aus.
-        for size in Self.sizes {
+    @Test func compactBoxesAreReachableByJumping() {
+        for size in Self.compactSizes {
             let p = PlaygroundLayout(area: NSRect(origin: .zero, size: size))
             let first = p.boxes[0].rect.maxY - p.dock.maxY
             #expect(first > 30 && first < 170)
@@ -543,6 +554,49 @@ struct SeededRandom: RandomNumberGenerator {
                 let second = p.boxes[1].rect.maxY - p.boxes[0].rect.maxY
                 #expect(second > 30 && second < 170)
             }
+        }
+    }
+
+    /// Alles, was Clawds Aktivitäten verlangen, ist ab der Mindestgröße vorhanden.
+    @Test func fullLayoutMeetsEveryRequirement() {
+        for size in Self.sizes {
+            let area = NSRect(origin: CGPoint(x: 100, y: 50), size: size)
+            let p = PlaygroundLayout(area: area)
+            #expect(p.boxes.count == 3)
+            let a = p.boxes[0].rect, c = p.boxes[1].rect, b = p.boxes[2].rect
+            let floor = area.minY
+            // Sprung auf A vom Boden und vom Dock.
+            for from in [floor, p.dock.maxY] { #expect(a.maxY - from > 30 && a.maxY - from < 170) }
+            // Dock lang genug für den Ballwechsel, Boden daneben für das Hinunterhüpfen.
+            #expect(p.dock.width - 2 * half >= 260)
+            #expect(p.dock.minX - area.minX >= 4 * half && area.maxX - p.dock.maxX >= 4 * half)
+            // Drachen: 250 pt Luft über dem Boden.
+            #expect(area.height >= 250 + 2 * half)
+
+            let ledges = p.boxes.map { Ascent.Ledge(id: $0.id, minX: $0.rect.minX, maxX: $0.rect.maxX, y: $0.rect.maxY, frame: $0.rect) }
+            let screens = [area]
+            // Von A aus: Enterhaken an die linke Kante von C, Jetpack auf C.
+            let onA = (a.minX + half)...(a.maxX - half)
+            let fromA = Ascent.grappleSpots(ledges: ledges, groundY: a.maxY, range: onA, center: a.midX, px: px,
+                                            magnetic: false, screens: screens)
+            #expect(fromA.contains { $0.id == p.boxes[1].id && $0.side == -1 }, "Haken von A auf C bei \(size)")
+            #expect(Ascent.jetTargets(ledges: ledges, groundY: a.maxY, center: a.midX, px: px, screens: screens)
+                .contains { $0.id == p.boxes[1].id })
+            // Vom Boden rechts: Haken an die linke Kante von B, mit Magnetschuhen an der Kante hoch.
+            let floorRight = (p.dock.maxX + half)...(area.maxX - half)
+            let fromFloor = Ascent.grappleSpots(ledges: ledges, groundY: floor, range: floorRight, center: b.minX - 60,
+                                                px: px, magnetic: true, screens: screens)
+            #expect(fromFloor.contains { $0.id == p.boxes[2].id && $0.side == -1 && $0.alongWall }, "Haken auf B bei \(size)")
+            #expect(Ascent.jetTargets(ledges: ledges, groundY: floor, center: b.midX, px: px, screens: screens)
+                .contains { $0.id == p.boxes[2].id })
+            // Magnetschuhe: B reicht bis zum Boden, man kommt beim Laufen an seine Kante.
+            let frames = Dictionary(uniqueKeysWithValues: p.boxes.map { ($0.id, $0.rect) })
+            #expect(PetController.climbableWall(in: frames, groundY: floor, from: b.minX - 2, to: b.minX + 1, direction: 1)?.id
+                    == p.boxes[2].id)
+            // Wandsprung von der rechten Kante von C hinüber zu B.
+            let foot = c.minY + 2 * half
+            #expect(PetController.wallJumpTarget(from: c.maxX, side: 1, footY: foot, selfID: p.boxes[1].id, windows: frames,
+                                                 margin: half)?.id == p.boxes[2].id, "Wandsprung bei \(size)")
         }
     }
 }
@@ -717,6 +771,17 @@ struct SeededRandom: RandomNumberGenerator {
 // MARK: - Stimme
 
 @Suite(.serialized) struct VoiceTests {
+    @Test func shortSoundsQueueInsteadOfCuttingEachOther() {
+        #expect(Voice.shouldQueue(remaining: 0.1))             // kurzer Laut läuft noch: dahinter
+        #expect(Voice.shouldQueue(remaining: Voice.queueWindow))
+        #expect(!Voice.shouldQueue(remaining: 1.2))            // langer Laut: unterbrechen
+        #expect(!Voice.shouldQueue(remaining: -0.5))           // nichts läuft: sofort
+    }
+
+    @Test func landingVariantsAreNoisesThatAlternate() {
+        #expect(Set(Voice.Sound.landing).count == 3)
+    }
+
     @Test func everySoundRendersAClippedBuffer() throws {
         let voice = Voice()
         for sound in Voice.Sound.allCases {
@@ -852,5 +917,168 @@ struct SeededRandom: RandomNumberGenerator {
     @Test func screensWithoutNotchNeedTheWholeFrame() {
         let window = NSRect(x: 0, y: 0, width: 1800, height: 1130)
         #expect(MediaWatcher.coveredScreens(windows: [window], screens: [screen]).isEmpty)
+    }
+}
+
+// MARK: - Hoch hinaus (Enterhaken, Jetpack)
+
+@Suite struct AscentTests {
+    let px: CGFloat = 4
+    let screen = NSRect(x: 0, y: 0, width: 1500, height: 1000)
+    /// Fenster 400…800, Oberkante bei 600 – vom Boden (y 0) aus zu hoch zum Springen.
+    let tall = NSRect(x: 400, y: 100, width: 400, height: 500)
+    var ledge: Ascent.Ledge { Ascent.Ledge(id: 7, minX: tall.minX, maxX: tall.maxX, y: tall.maxY, frame: tall) }
+
+    @Test func standsBesideBothEdgesWithHandAtTheEdge() {
+        let spots = Ascent.grappleSpots(ledges: [ledge], groundY: 0, range: 28...1472, center: 600, px: px,
+                                        magnetic: false, screens: [screen])
+        #expect(spots.map(\.side).sorted() == [-1, 1])
+        let left = spots.first { $0.side < 0 }!
+        #expect(left.spotX == 400 - 6 * px && left.facing == 1)
+        #expect(left.landX > 400 && left.landX < 800 && !left.alongWall)
+    }
+
+    @Test func lowWindowsAreLeftToJumping() {
+        let low = NSRect(x: 400, y: 0, width: 400, height: 150)
+        let l = Ascent.Ledge(id: 1, minX: low.minX, maxX: low.maxX, y: low.maxY, frame: low)
+        #expect(Ascent.grappleSpots(ledges: [l], groundY: 0, range: 28...1472, center: 600, px: px,
+                                    magnetic: false, screens: [screen]).isEmpty)
+        #expect(Ascent.jetTargets(ledges: [l], groundY: 0, center: 600, px: px, screens: [screen]).isEmpty)
+    }
+
+    @Test func coveredCornerOrNoRoomBesideTheEdgeGivesNoSpot() {
+        // Linke Ecke von einem anderen Fenster verdeckt: nur rechts.
+        let cut = Ascent.Ledge(id: 7, minX: 500, maxX: 800, y: 600, frame: tall)
+        let spots = Ascent.grappleSpots(ledges: [cut], groundY: 0, range: 28...1472, center: 600, px: px,
+                                        magnetic: false, screens: [screen])
+        #expect(spots.map(\.side) == [1])
+        // Rechts kein Platz auf der eigenen Fläche (Fläche endet bei 810).
+        #expect(Ascent.grappleSpots(ledges: [cut], groundY: 0, range: 28...810, center: 600, px: px,
+                                    magnetic: false, screens: [screen]).isEmpty)
+    }
+
+    @Test func magneticShoesClimbAlongEdgesThatReachTheGround() {
+        let grounded = NSRect(x: 400, y: 0, width: 400, height: 600)
+        let l = Ascent.Ledge(id: 3, minX: 400, maxX: 800, y: 600, frame: grounded)
+        let spots = Ascent.grappleSpots(ledges: [l, ledge], groundY: 0, range: 28...1472, center: 600, px: px,
+                                        magnetic: true, screens: [screen])
+        let climbing = spots.filter { $0.id == 3 }.map(\.alongWall)
+        let hanging = spots.filter { $0.id == 7 }.map(\.alongWall)
+        #expect(climbing == [true, true])
+        #expect(hanging == [false, false]) // schwebt über dem Boden
+    }
+
+    @Test func screenEdgeHookGoesUnderTheMenuBar() {
+        let area = ScreenArea(frame: screen, visibleFrame: NSRect(x: 0, y: 0, width: 1500, height: 975))
+        // Virtuelles Randfenster links neben dem Bildschirm: seine rechte Seite ist der Bildschirmrand.
+        let edges: [CGWindowID: NSRect] = [0xFFFF_0001: NSRect(x: -100, y: 0, width: 100, height: 1000)]
+        let spots = Ascent.screenEdgeSpots(edges: edges, screens: [area], groundY: 0, range: 28...1472, center: 100, px: px)
+        #expect(spots.count == 1)
+        #expect(spots[0].side == 1 && spots[0].top == 975 && spots[0].screenEdge && spots[0].alongWall)
+        #expect(spots[0].spotX == 28) // ganz am Rand: Hand ein Stück vor der Kante
+    }
+
+    @Test func jetpackLandsAboveWhereClawdStands() {
+        let targets = Ascent.jetTargets(ledges: [ledge], groundY: 0, center: 600, px: px, screens: [screen])
+        #expect(targets == [Ascent.JetTarget(id: 7, top: 600, landX: 600)])
+        let far = Ascent.jetTargets(ledges: [ledge], groundY: 0, center: 1300, px: px, screens: [screen])
+        #expect(far.isEmpty) // weiter als `maxDistance`
+        #expect(Ascent.jetTargets(ledges: [ledge], groundY: 0, center: 1100, px: px, screens: [screen]).first?.landX == 800 - 14 * px - 4)
+    }
+
+    @Test func needsRoomAboveTheWindow() {
+        // Oberkante 60 pt unter dem oberen Bildschirmrand: zu eng (72 pt nötig).
+        let high = NSRect(x: 400, y: 300, width: 400, height: 640)
+        let l = Ascent.Ledge(id: 9, minX: 400, maxX: 800, y: high.maxY, frame: high)
+        #expect(Ascent.grappleSpots(ledges: [l], groundY: 0, range: 28...1472, center: 600, px: px,
+                                    magnetic: false, screens: [screen]).isEmpty)
+        #expect(Ascent.jetTargets(ledges: [l], groundY: 0, center: 600, px: px, screens: [screen]).isEmpty)
+        // Kleinerer Clawd braucht weniger: bei px 3 reichen 54 pt.
+        #expect(!Ascent.jetTargets(ledges: [l], groundY: 0, center: 600, px: 3, screens: [screen]).isEmpty)
+    }
+
+    @Test func framesAreRectangularWithKnownColors() {
+        let S = ClawdSprite.self
+        let props = [S.grappleLauncher, S.grappleHook, S.grappleHookCaught, S.wavyRope(length: 9), S.tautRope(length: 5),
+                     S.jetpackFront, S.jetpackSide, S.jetSputter(0), S.jetSputter(1), S.jetSputter(2), S.jetFlameShort,
+                     S.jetFlameFull(0), S.jetFlameFull(1), S.smokePuff, S.smokePuffSmall, S.flightGoggles]
+        let clawd = [S.aimUp, S.jetFly, S.jetStand] + S.ropeClimb
+        for f in props + clawd {
+            #expect(f.allSatisfy { $0.count == f[0].count })
+            for ch in f.joined() where ch != "." {
+                #expect(S.rgb(ch, theme: .light) != nil && S.rgb(ch, theme: .dark) != nil, "Zeichen \(ch)")
+            }
+        }
+        for f in clawd { #expect(f.count == S.rows && f[0].count == S.columns) }
+        #expect(S.flightGoggles[0].count == 2 * S.columns) // sitzt wie ein Hut auf dem Kopf
+    }
+}
+
+// MARK: - Sanft landen (Regenschirm, Ballon)
+
+@Suite struct ChuteSpriteTests {
+    @Test func framesAreRectangularWithKnownColors() {
+        let S = ClawdSprite.self
+        let props = [S.umbrellaOpen, S.umbrellaHalf, S.balloon(size: 0), S.balloon(size: 1), S.balloon(size: 2),
+                     S.sighPuff, S.raisedArm(rows: 4)]
+        let clawd = S.hangFrames + [S.relieved]
+        for f in props + clawd {
+            #expect(f.allSatisfy { $0.count == f[0].count })
+            for ch in f.joined() where ch != "." {
+                #expect(S.rgb(ch, theme: .light) != nil && S.rgb(ch, theme: .dark) != nil, "Zeichen \(ch)")
+            }
+        }
+        for f in clawd { #expect(f.count == S.rows && f[0].count == S.columns) }
+        // Schirm offen und halb gleich groß, damit beim Aufspannen nichts springt; Ballon wächst nur oben.
+        #expect(S.umbrellaOpen.count == S.umbrellaHalf.count && S.umbrellaOpen[0].count == S.umbrellaHalf[0].count)
+        #expect(Set((0...2).map { S.balloon(size: $0).count }).count == 1)
+    }
+}
+
+// MARK: - Ruhige Phase
+
+@Suite struct CalmWeightsTests {
+    /// Zeitanteil fürs Schlafen in der ruhigen Phase (Gewicht × mittlere Dauer).
+    func sleepShare(_ a: Double) -> Double {
+        let w = PetController.calmWeights(activity: a)
+        let walk = w.walk * 13, idle = w.idle * 4 / w.idlePace, sit = w.sit * 10.5 / w.restPace
+        let sleep = w.sleep * 27.5 / w.restPace
+        return sleep / (walk + idle + sit + sleep)
+    }
+
+    @Test func lowActivitySleepsLessThanBefore() {
+        // Früher schlief Clawd bei "Faulpelz" gut 40 % der ruhigen Phase.
+        #expect(sleepShare(0.35) < 0.2)
+        #expect(sleepShare(0.65) < 0.25)
+        let lazy = PetController.calmWeights(activity: 0.35), normal = PetController.calmWeights(activity: 1)
+        #expect(lazy.walk >= normal.walk)
+        #expect(lazy.sleep <= normal.sleep)
+    }
+
+    @Test func normalAndActiveAreUnchanged() {
+        let n = PetController.calmWeights(activity: 1)
+        #expect(n == .init(walk: 0.45, idle: 0.15, sit: 0.1, sleep: 0.05, idlePace: 1, restPace: 1))
+        let a = PetController.calmWeights(activity: 1.6)
+        #expect(abs(a.walk - 0.72) < 1e-9 && abs(a.sleep - 0.05 / 1.6) < 1e-9 && abs(a.sit - 0.1 / 1.6) < 1e-9)
+    }
+}
+
+@Suite struct SnoreTests {
+    @Test func quietSnoresOnlyNowAndThenChattyThroughout() {
+        let quiet = PetController.snorePause(talkativeness: 0.4)
+        let normal = PetController.snorePause(talkativeness: 1)
+        let chatty = PetController.snorePause(talkativeness: 2.5)
+        #expect(chatty == 0...0)
+        #expect(normal.lowerBound > 0 && normal.upperBound < quiet.lowerBound)
+        #expect(quiet.lowerBound >= 10) // höchstens etwa alle 15–30 s ein Schnarcher
+    }
+
+    @Test func eatingSoundsFollowTheSameRule() {
+        let chance = { PetController.nowAndThenChance(talkativeness: $0) }
+        #expect(chance(0) == 0)
+        #expect(chance(2.5) == 1)
+        #expect(chance(0.4) < chance(1) && chance(1) < 1)
+        // Eine Mahlzeit hat 9 Laute (4 × schlürfen + kauen, am Ende zufrieden): Wortkarg ≈ 2.
+        #expect(9 * chance(0.4) <= 2.5)
     }
 }

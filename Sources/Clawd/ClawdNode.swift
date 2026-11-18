@@ -224,6 +224,7 @@ final class ClawdNode {
         let headTop = (CGFloat(ClawdSprite.rows - ClawdSprite.headRow(sprite)) + liftPixels) * pixel
         let center = spriteOriginX + CGFloat(ClawdSprite.columns) * pixel / 2 + (facingLeft ? -3 : 3) * pixel
         bubbleLayer.contents = ClawdSprite.cgImage(b, mirrored: facingLeft)
+        EffectLayers.applyShadow(ClawdSprite.bubbleHasShadow(b), to: bubbleLayer, scale: scale)
         bubbleLayer.frame = CGRect(x: center - width / 2, y: headTop + pixel,
                                    width: width, height: CGFloat(b.count) * scale)
     }

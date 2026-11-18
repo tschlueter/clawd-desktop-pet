@@ -33,6 +33,7 @@ enum DebugLog {
 /// - `--record <datei.gif>` – ein Clawd fällt in den Spielplatz; aufgenommen wird ab der Landung
 /// - `--record-seconds <s>` – Länge der Aufnahme (Standard 8)
 /// - `--record-from-start` – schon den Fall in den Spielplatz aufnehmen
+/// - `--drop x,y` – bei Aufnahmen relativ zur unteren linken Ecke des Spielplatzes
 /// - `--record-rect x,y,b,h` – nur diesen Ausschnitt (Punkte, von unten links im Spielplatz)
 /// - `--record-scale <f>` – Auflösung (Standard 2)
 /// - `--playground-size BxH` – Größe des Spielplatz-Fensters
